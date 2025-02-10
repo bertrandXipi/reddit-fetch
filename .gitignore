@@ -1,2 +1,5 @@
 .env
 *.txt
+*.json
+__pycache__/
+script.py

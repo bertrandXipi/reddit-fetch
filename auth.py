@@ -1,17 +1,27 @@
 import requests
 import base64
-import threading
+import json
+import os
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
-import time
-from config import CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, USER_AGENT
+from config import CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, USER_AGENT, TOKEN_FILE
 
-auth_code = None  # Stores auth code after successful login
+# Global variable to store the authorization code
+auth_code = None
+
+def load_tokens():
+    if os.path.exists(TOKEN_FILE):
+        try:
+            with open(TOKEN_FILE, "r", encoding="utf-8") as file:
+                return json.load(file)
+        except json.JSONDecodeError:
+            print("❌ Token file is corrupted. Resetting...")
+            os.remove(TOKEN_FILE)
+    return None
 
 class AuthHandler(BaseHTTPRequestHandler):
-    """Handles OAuth2 authentication by capturing the authorization code."""
-    
     def do_GET(self):
         global auth_code
         query_components = parse_qs(urlparse(self.path).query)
@@ -27,32 +37,23 @@ class AuthHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"Error: Authorization code not found.")
 
 def start_auth_server():
-    """Starts a local server to capture the Reddit authorization code."""
+    global auth_code
     server = HTTPServer(("localhost", 8080), AuthHandler)
     print("🌍 Waiting for authorization...")
     server.handle_request()
 
-def get_tokens():
-    """Handles the OAuth2 flow and retrieves access & refresh tokens."""
-    
-    threading.Thread(target=start_auth_server, daemon=True).start()
-
-    # Open Reddit OAuth login page
-    authorization_url = (
-        f"https://www.reddit.com/api/v1/authorize?client_id={CLIENT_ID}&response_type=code"
-        f"&state=RANDOM_STRING&redirect_uri={REDIRECT_URI}&duration=permanent&scope=identity history read save"
-    )
+def get_new_tokens():
     print("🌍 Opening Reddit authorization page in your browser...")
-    webbrowser.open(authorization_url)
-
-    # Wait for auth code to be captured
-    while auth_code is None:
-        time.sleep(0.1)
-
-    # Exchange auth code for access token
+    webbrowser.open(f"https://www.reddit.com/api/v1/authorize?client_id={CLIENT_ID}&response_type=code&state=RANDOM_STRING&redirect_uri={REDIRECT_URI}&duration=permanent&scope=identity history read save")
+    start_auth_server()
+    
+    if not auth_code:
+        print("❌ No authorization code received. Exiting...")
+        return None
+    
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     b64_auth = base64.b64encode(auth_string.encode()).decode()
-
+    
     headers = {
         "Authorization": f"Basic {b64_auth}",
         "User-Agent": USER_AGENT,
@@ -63,13 +64,48 @@ def get_tokens():
         "code": auth_code,
         "redirect_uri": REDIRECT_URI
     }
-
+    
     response = requests.post("https://www.reddit.com/api/v1/access_token", headers=headers, data=data)
-
+    
+    print("🔍 Response Status Code:", response.status_code)
+   # print("🔍 Response Content:", response.text)
+    
     if response.status_code == 200:
         tokens = response.json()
-        print("✅ Successfully authenticated!")
+        with open(TOKEN_FILE, "w", encoding="utf-8") as file:
+            json.dump(tokens, file)
+        print("✅ Authentication successful. Tokens saved.")
         return tokens
-    else:
-        print("❌ Error:", response.text)
-        return None
+    
+    print("❌ Authentication failed. Exiting...")
+    return None
+def refresh_access_token():
+    tokens = load_tokens()
+    if not tokens or "refresh_token" not in tokens:
+        print("❌ No refresh token found. Re-authenticating...")
+        return get_new_tokens()
+    
+    refresh_token = tokens["refresh_token"]
+    auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
+    b64_auth = base64.b64encode(auth_string.encode()).decode()
+    
+    headers = {
+        "Authorization": f"Basic {b64_auth}",
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token
+    }
+    
+    response = requests.post("https://www.reddit.com/api/v1/access_token", headers=headers, data=data)
+    if response.status_code == 200:
+        tokens["access_token"] = response.json().get("access_token")
+        with open(TOKEN_FILE, "w", encoding="utf-8") as file:
+            json.dump(tokens, file)
+        print("🔄 Access token refreshed successfully.")
+        return tokens["access_token"]
+    
+    print(f"❌ Failed to refresh access token: {response.status_code} - {response.text}")
+    return get_new_tokens()
