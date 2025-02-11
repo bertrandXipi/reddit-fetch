@@ -20,8 +20,8 @@ This script allows users to **fetch their saved Reddit posts and comments** usin
 First, clone this repository to your local or headless server environment:
 
 ```bash
-git clone https://github.com/akashpandey/Reddit-Fetch
-cd Reddit-Fetcher
+git clone https://github.com/akashpandey/Reddit-Fetch.git
+cd Reddit-Fetch
 ```
 
 ### **2️⃣ Prerequisites**
@@ -83,11 +83,11 @@ python main.py
 1. **Run `generate_tokens.py` on a Windows or Desktop machine** to generate `tokens.json`.
 2. **Copy `tokens.json`** to your headless server:
    ```bash
-   scp tokens.json user@your-server:/path/to/Reddit-Fetcher/
+   scp tokens.json user@your-server:/path/to/Reddit-Fetch/
    ```
 3. **On the headless server, navigate to the script directory and run:**
    ```bash
-   cd /path/to/Reddit-Fetcher
+   cd /path/to/Reddit-Fetch
    python main.py
    ```
 
