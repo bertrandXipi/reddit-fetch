@@ -1,3 +1,4 @@
+import threading
 import requests
 import base64
 import json
@@ -43,17 +44,20 @@ def start_auth_server():
     server.handle_request()
 
 def get_new_tokens():
+    print("🔄 Requesting new authentication tokens...")
+    global auth_code
+    threading.Thread(target=start_auth_server, daemon=True).start()
+    authorization_url = (
+        f"https://www.reddit.com/api/v1/authorize?client_id={CLIENT_ID}&response_type=code"
+        f"&state=RANDOM_STRING&redirect_uri={REDIRECT_URI}&duration=permanent&scope=identity history read save"
+    )
     print("🌍 Opening Reddit authorization page in your browser...")
-    webbrowser.open(f"https://www.reddit.com/api/v1/authorize?client_id={CLIENT_ID}&response_type=code&state=RANDOM_STRING&redirect_uri={REDIRECT_URI}&duration=permanent&scope=identity history read save")
-    start_auth_server()
-    
-    if not auth_code:
-        print("❌ No authorization code received. Exiting...")
-        return None
-    
+    webbrowser.open(authorization_url)
+    while auth_code is None:
+        time.sleep(0.1)
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     b64_auth = base64.b64encode(auth_string.encode()).decode()
-    
+    url = "https://www.reddit.com/api/v1/access_token"
     headers = {
         "Authorization": f"Basic {b64_auth}",
         "User-Agent": USER_AGENT,
@@ -64,21 +68,16 @@ def get_new_tokens():
         "code": auth_code,
         "redirect_uri": REDIRECT_URI
     }
-    
-    response = requests.post("https://www.reddit.com/api/v1/access_token", headers=headers, data=data)
-    
-    print("🔍 Response Status Code:", response.status_code)
-   # print("🔍 Response Content:", response.text)
-    
+    response = requests.post(url, headers=headers, data=data)
     if response.status_code == 200:
         tokens = response.json()
+        tokens["timestamp"] = time.time()
         with open(TOKEN_FILE, "w", encoding="utf-8") as file:
             json.dump(tokens, file)
-        print("✅ Authentication successful. Tokens saved.")
         return tokens
-    
-    print("❌ Authentication failed. Exiting...")
-    return None
+    else:
+        print(f"❌ Error: {response.status_code} - {response.text}")
+        return None
 def refresh_access_token():
     tokens = load_tokens()
     if not tokens or "refresh_token" not in tokens:
@@ -102,6 +101,7 @@ def refresh_access_token():
     response = requests.post("https://www.reddit.com/api/v1/access_token", headers=headers, data=data)
     if response.status_code == 200:
         tokens["access_token"] = response.json().get("access_token")
+        tokens["timestamp"] = time.time()
         with open(TOKEN_FILE, "w", encoding="utf-8") as file:
             json.dump(tokens, file)
         print("🔄 Access token refreshed successfully.")

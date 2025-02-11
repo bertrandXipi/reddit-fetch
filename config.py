@@ -8,7 +8,7 @@ load_dotenv()
 # Reddit API credentials
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-REDIRECT_URI = "http://localhost:8080"  # Must match the Reddit App settings
+REDIRECT_URI = os.getenv("REDIRECT_URI")  # Must match the Reddit App settings
 USER_AGENT = os.getenv("USER_AGENT")  # Fetch dynamically
 REDDIT_USERNAME = os.getenv("REDDIT_USERNAME")  # Fetch dynamically
 TOKEN_FILE = "tokens.json"

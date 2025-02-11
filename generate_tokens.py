@@ -1,3 +1,4 @@
+import time
 import requests
 import base64
 import os
@@ -14,7 +15,7 @@ load_dotenv()
 # Reddit API Credentials
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-REDIRECT_URI = "http://localhost:8080"  # Must match the one registered in Reddit App
+REDIRECT_URI = os.getenv("REDIRECT_URI")  # Must match the one registered in Reddit App
 USER_AGENT = os.getenv("USER_AGENT")  # Fetch dynamically
 TOKEN_FILE = "tokens.json"
 
@@ -38,13 +39,31 @@ class AuthHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"Error: Authorization code not found.")
 
 def start_auth_server():
+    """Starts a local HTTP server to capture the Reddit authorization code."""
     server = HTTPServer(("localhost", 8080), AuthHandler)
     print("🌍 Waiting for authorization...")
     server.handle_request()
 
-def get_tokens():
-    global auth_code
+def load_existing_tokens():
+    """Checks if a refresh token is already stored in tokens.json."""
+    if os.path.exists(TOKEN_FILE):
+        try:
+            with open(TOKEN_FILE, "r", encoding="utf-8") as file:
+                tokens = json.load(file)
+                if "refresh_token" in tokens:
+                    print("✅ Refresh token already exists. No need to re-authenticate.")
+                    return True  # A refresh token is already stored
+        except (json.JSONDecodeError, ValueError):
+            print("❌ Token file is corrupted. Re-authenticating...")
+    return False  # No valid refresh token found, proceed with OAuth
 
+def get_tokens():
+    """Fetch new OAuth tokens from Reddit and store only the refresh token."""
+    # Check if refresh token already exists
+    if load_existing_tokens():
+        return  # Skip authentication
+
+    global auth_code
     threading.Thread(target=start_auth_server, daemon=True).start()
 
     authorization_url = (
@@ -56,11 +75,11 @@ def get_tokens():
     webbrowser.open(authorization_url)
 
     while auth_code is None:
-        pass  # Wait for authorization code
+        time.sleep(0.1)
 
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     b64_auth = base64.b64encode(auth_string.encode()).decode()
-
+    
     url = "https://www.reddit.com/api/v1/access_token"
     headers = {
         "Authorization": f"Basic {b64_auth}",
@@ -77,14 +96,14 @@ def get_tokens():
 
     if response.status_code == 200:
         tokens = response.json()
-        refresh_token = tokens.get("refresh_token")
+        
+        # Save only the refresh token (no timestamp needed)
+        token_data = {"refresh_token": tokens["refresh_token"]}
 
-        if refresh_token:
-            with open(TOKEN_FILE, "w", encoding="utf-8") as file:
-                json.dump({"refresh_token": refresh_token}, file)
-            print("✅ Refresh token saved to refresh_token.json")
-        else:
-            print("❌ Failed to retrieve refresh token.")
+        with open(TOKEN_FILE, "w", encoding="utf-8") as file:
+            json.dump(token_data, file)
+        
+        print("✅ Refresh token saved in tokens.json")
     else:
         print(f"❌ Error: {response.status_code} - {response.text}")
 

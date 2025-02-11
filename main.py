@@ -29,9 +29,12 @@ tokens = authenticate()
 access_token = tokens.get("access_token")
 refresh_token = tokens.get("refresh_token")
 
+def token_expired(tokens):
+    return "timestamp" not in tokens or (time.time() - tokens["timestamp"]) >= 3600
+
 # Refresh token if needed
-if not access_token:
-    print("🔄 No valid access token found. Refreshing...")
+if not access_token or token_expired(tokens):
+    print("🔄 No valid access token found or token expired. Refreshing...")
     access_token = refresh_access_token()
     if not access_token:
         print("❌ Unable to refresh token. Exiting...")
