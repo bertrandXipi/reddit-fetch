@@ -3,3 +3,4 @@ saved_posts.txt
 *.json
 __pycache__/
 script.py
+*.html

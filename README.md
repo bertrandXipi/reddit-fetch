@@ -3,13 +3,15 @@
 
 ## 📌 Overview
 
-This script allows users to **fetch their saved Reddit posts and comments** using the Reddit API with OAuth authentication. It automatically retrieves new saved posts and stores them in a local text file, maintaining a **delta-fetching mechanism** to avoid duplicate retrieval.
+This script fetches your **saved Reddit posts and comments** using the Reddit API with OAuth authentication. It retrieves new saved posts and exports them as **text** or **HTML bookmarks**, allowing seamless integration with **Linkwarden** and **Hoarder**.
 
-### **💡 Use Cases**
+### **Key Features**
 
-* **Backup your saved Reddit posts** locally for reference.
-* **Organize and analyze saved posts** without relying on Reddit.
-* **Automate Reddit data extraction** for research purposes.
+- **Delta Fetching**: Retrieves only new saved posts, avoiding duplication.
+- **Multiple Export Formats**: Supports **plain text** and **HTML bookmarks**.
+- **Automation-Friendly**: Can be scheduled to run at intervals.
+- **Integration Support**: Compatible with **Linkwarden** and **Hoarder**.
+- **Force Fetching**: Optionally re-fetch all saved posts.
 
 ---
 
@@ -17,38 +19,28 @@ This script allows users to **fetch their saved Reddit posts and comments** usin
 
 ### **1️⃣ Clone the Repository**
 
-First, clone this repository to your local or headless server environment:
-
 ```bash
 git clone https://github.com/akashpandey/Reddit-Fetch.git
 cd Reddit-Fetch
 ```
 
-### **2️⃣ Prerequisites**
+### **2️⃣ Install Dependencies**
 
-* **Python 3.x** installed on your system.
-* Install required dependencies:
-  ```bash
-  pip install -r requirements.txt
-  ```
+Ensure **Python 3.x** is installed, then install required packages:
 
-#### **Contents of `requirements.txt`**
+```bash
+pip install -r requirements.txt
+```
 
-* `requests` - For making API calls to Reddit.
-* `python-dotenv` - For managing environment variables securely.
+### **3️⃣ Configure Reddit API Credentials**
 
-### **3️⃣ Setting Up Reddit API Credentials**
+1. Go to [Reddit Apps](https://www.reddit.com/prefs/apps) and create a **Web App**.
+2. Set the **Redirect URI** to `http://localhost:8080`.
+3. Copy the **Client ID** and **Client Secret**.
 
-1. Go to [Reddit Apps](https://www.reddit.com/prefs/apps) and click  **Create App** .
-2. Choose **Web App** as the application type.
-3. Enter an **App Name** (e.g., `Reddit Saved Posts Fetcher`).
-4. Set the **Redirect URI** to: `http://localhost:8080`
-5. Click  **Create App** .
-6. Copy the **Client ID** (found under the app name) and  **Client Secret** .
+### **4️⃣ Create `.env` File**
 
-### **4️⃣ Configure `.env` File**
-
-Create a `.env` file in the project directory and add the following:
+Create a `.env` file in the project directory and add your credentials:
 
 ```ini
 CLIENT_ID=your_client_id
@@ -62,77 +54,83 @@ REDDIT_USERNAME=your_reddit_username
 
 ## 🔑 Authentication & Token Handling
 
-### **1️⃣ First-time Authentication (Desktop Mode)**
+### **1️⃣ Generate Authentication Tokens**
 
-1. Run `generate_tokens.py` to  **generate `tokens.json`** :
+Run the following command to authenticate with Reddit and generate `tokens.json`:
 
 ```bash
 python generate_tokens.py
 ```
 
-2. This will **open a browser window** for authorization.
-3. After authentication, a `tokens.json` file will be generated containing the  **refresh token** .
-4. Run `main.py` to fetch your saved posts:
-
-```bash
-python main.py
-```
-
 ### **2️⃣ Running on a Headless Server**
 
-1. **Run `generate_tokens.py` on a Windows or Desktop machine** to generate `tokens.json`.
-2. **Copy `tokens.json`** to your headless server:
+If running on a server without a browser:
+
+1. Run `generate_tokens.py` on a desktop machine to authenticate.
+2. Copy the generated `tokens.json` to the server:
    ```bash
    scp tokens.json user@your-server:/path/to/Reddit-Fetch/
    ```
-3. **On the headless server, navigate to the script directory and run:**
-   ```bash
-   cd /path/to/Reddit-Fetch
-   python main.py
-   ```
-
-* The script will use the copied `tokens.json` to fetch new access tokens automatically.
+3. Run the script on the server normally.
 
 ### **3️⃣ Handling Token Expiration**
 
-* Access tokens expire **every 1 hour** but are  **automatically refreshed** .
-* If the refresh token becomes invalid,  **re-run `generate_tokens.py`** .
+- Access tokens expire every **1 hour**, but they are **automatically refreshed**.
+- If the refresh token becomes invalid, rerun `generate_tokens.py`.
 
 ---
 
 ## 🚀 Running the Script
 
-To fetch  **new saved posts** , run:
+### **Fetching New Saved Posts**
+
+To fetch new saved posts and export as text:
 
 ```bash
-python main.py
+python main.py --format text
 ```
 
-### **What Happens?**
+To export saved posts as **HTML bookmarks** for **Linkwarden & Hoarder**:
 
-✅ **Checks for existing tokens** and refreshes if needed.
+```bash
+python main.py --format html
+```
 
-✅ **Fetches only new saved posts** since the last run.
+### **Force Fetch All Posts**
 
-✅ **Appends posts and comments** to `saved_posts.txt`.
+By default, the script fetches **only new posts** based on `last_fetch.json`. If you want to **re-fetch all saved posts**, use:
+
+```bash
+python main.py --format text --force-fetch
+```
+
+OR
+
+```bash
+python main.py --format html --force-fetch
+```
+
+This ignores `last_fetch.json` and retrieves all posts from Reddit.
 
 ---
 
 ## 📂 Data Storage
 
-| File                | Purpose                                 |
-| ------------------- | --------------------------------------- |
-| `tokens.json`     | Stores refresh token for authentication |
-| `saved_posts.txt` | Contains retrieved posts and comments   |
-| `last_fetch.json` | Tracks last fetch timestamp             |
+| File                | Purpose                                           |
+| ------------------- | ------------------------------------------------- |
+| `tokens.json`     | Stores authentication tokens                      |
+| `saved_posts.txt` | Contains fetched posts and comments               |
+| `bookmarks.html`  | HTML-formatted bookmarks for Linkwarden & Hoarder |
+| `last_fetch.json` | Tracks last fetch timestamp                       |
 
 ---
 
 ## 🛠️ Advanced Features
 
-* **Delta Fetching** : Avoids duplicate retrieval by checking timestamps.
-* **Automated Execution** : Can be scheduled via **cron jobs** or  **Windows Task Scheduler** .
-* **Headless Server Support** : Easily run on cloud servers or Raspberry Pi.
+- **Delta Fetching**: Avoids duplicate retrieval using timestamps.
+- **Automated Execution**: Schedule via **cron jobs** or **Windows Task Scheduler**.
+- **Headless Server Support**: Runs on cloud servers or Raspberry Pi.
+- **Bookmark Manager Integration**: Direct import into **Linkwarden** and **Hoarder**.
 
 ---
 
@@ -140,22 +138,23 @@ python main.py
 
 ### **1️⃣ Token Errors**
 
-* If `tokens.json` is empty or corrupted, **delete it** and re-run `generate_tokens.py`.
-* Ensure the **correct Reddit API credentials** are set in `.env`.
+- If `tokens.json` is missing or corrupted, **delete it** and rerun `generate_tokens.py`.
+- Ensure the correct **Reddit API credentials** are set in `.env`.
 
 ### **2️⃣ Fetching Issues**
 
-* Ensure the **correct username** is set in `config.py`.
-* Check if Reddit API rate limits have been hit.
+- Make sure your **Reddit username** is correctly set in `config.py`.
+- Check if you've hit **Reddit API rate limits**.
 
 ---
 
 ## 📌 Future Enhancements
 
-* **Web UI for browsing saved posts** .
-* **Content summarization using AI** .
-* **Better retry mechanisms for API errors** .
+- **Direct API integration with Linkwarden**.
+- **RSS Feed Generation for Hoarder**.
+- **Content summarization using AI**.
+- **Improved retry mechanisms for API errors**.
 
 ---
 
-💡 **Contributions and feedback are welcome!** 🚀
+💡 **Contributions & feedback are welcome!** 🚀
