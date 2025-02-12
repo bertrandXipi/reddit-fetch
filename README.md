@@ -3,14 +3,14 @@
 
 ## 📌 Overview
 
-This script fetches your **saved Reddit posts and comments** using the Reddit API with OAuth authentication. It retrieves new saved posts and exports them as **text** or **HTML bookmarks**, allowing seamless integration with **Linkwarden** and **Hoarder**.
+This script fetches your **saved Reddit posts and comments** using the Reddit API with OAuth authentication. It supports exporting saved posts in **plain text** or **HTML bookmarks**, making it easy to archive and integrate with tools like [**Linkwarden**](https://github.com/linkwarden/linkwarden) and [**Hoarder**](https://github.com/hoarder-app/hoarder).
 
 ### **Key Features**
 
 - **Delta Fetching**: Retrieves only new saved posts, avoiding duplication.
 - **Multiple Export Formats**: Supports **plain text** and **HTML bookmarks**.
 - **Automation-Friendly**: Can be scheduled to run at intervals.
-- **Integration Support**: Compatible with **Linkwarden** and **Hoarder**.
+- **Integration Support**: Compatible with [**Linkwarden**](https://github.com/linkwarden/linkwarden) and [**Hoarder**](https://github.com/hoarder-app/hoarder).
 - **Force Fetching**: Optionally re-fetch all saved posts.
 
 ---
@@ -90,7 +90,7 @@ To fetch new saved posts and export as text:
 python main.py --format text
 ```
 
-To export saved posts as **HTML bookmarks** for **Linkwarden & Hoarder**:
+To export saved posts as **HTML bookmarks** for **[Linkwarden](https://github.com/linkwarden/linkwarden) & [Hoarder](https://github.com/hoarder-app/hoarder)**:
 
 ```bash
 python main.py --format html
@@ -130,7 +130,7 @@ This ignores `last_fetch.json` and retrieves all posts from Reddit.
 - **Delta Fetching**: Avoids duplicate retrieval using timestamps.
 - **Automated Execution**: Schedule via **cron jobs** or **Windows Task Scheduler**.
 - **Headless Server Support**: Runs on cloud servers or Raspberry Pi.
-- **Bookmark Manager Integration**: Direct import into **Linkwarden** and **Hoarder**.
+- **Bookmark Manager Integration**: Direct import into **[Linkwarden](https://github.com/linkwarden/linkwarden)** and **[Hoarder](https://github.com/hoarder-app/hoarder)**.
 
 ---
 
