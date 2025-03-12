@@ -30,7 +30,7 @@ def load_tokens_safe():
     if not os.path.exists(TOKEN_FILE):
         console.print("❌ [bold red]No authentication tokens found.[/bold red]")
         if is_headless():
-            console.print("🔹 [bold yellow]Headless mode detected.[/bold yellow] Please authenticate on a machine with a browser.")
+            console.print("🔹 [bold yellow]Headless mode detected.[/bold yellow] Please authenticate on a machine with a browser using 'generate_tokens.py'.")
             console.print("🔹 Copy 'tokens.json' back to this system after authentication.")
             sys.exit(1)
         return get_new_tokens()
