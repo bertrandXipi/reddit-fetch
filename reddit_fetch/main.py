@@ -1,9 +1,9 @@
-from reddit_fetch.auth import load_tokens, get_new_tokens, refresh_access_token
+import os
+import json
+import sys
+from reddit_fetch.auth import load_tokens_safe, refresh_access_token_safe
 from reddit_fetch.api import make_request
 from reddit_fetch.config import REDDIT_USERNAME
-import json
-import argparse
-import os
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.progress import track
@@ -15,20 +15,13 @@ DEFAULT_OUTPUT_FILE = "saved_posts"
 def fetch_saved_posts(format="json", force_fetch=False):
     """
     Fetch saved Reddit posts and return them as structured data.
-    
-    :param format: Output format ("json" or "html"). Default is "json".
-    :param force_fetch: If True, fetches all saved posts ignoring last fetch timestamp.
-    :return: List of saved posts (JSON structure if format="json", HTML string if format="html").
     """
-    tokens = load_tokens() or get_new_tokens()
-    if not tokens:
-        raise Exception("Authentication failed. Please check your credentials.")
-    
+    tokens = refresh_access_token_safe()
     console.print("📡 Fetching saved Reddit posts...", style="bold blue")
-
+    
     all_posts = []
     after = None
-
+    
     while True:
         endpoint = f"/user/{REDDIT_USERNAME}/saved?limit=100"
         if after:
@@ -37,14 +30,14 @@ def fetch_saved_posts(format="json", force_fetch=False):
         saved_posts = make_request(endpoint)
         if not saved_posts or "data" not in saved_posts:
             break
-
+        
         posts = saved_posts["data"].get("children", [])
         all_posts.extend(posts)
-
+        
         after = saved_posts["data"].get("after")  # Get the next batch cursor
-        if not after:  # Stop when there's no more data
+        if not after:
             break
-
+    
     if format == "json":
         cleaned_posts = []
         for post in track(all_posts, description="Processing posts..."):
@@ -72,9 +65,6 @@ def fetch_saved_posts(format="json", force_fetch=False):
         return html_output
 
 def cli_entry():
-    """
-    CLI entry point for `reddit-fetcher` command.
-    """
     console.print("\n🚀 [bold cyan]Welcome to Reddit Saved Posts Fetcher![/bold cyan]", style="bold yellow")
     console.print("Fetch and save your Reddit saved posts easily.\n", style="italic green")
     
@@ -97,6 +87,6 @@ def cli_entry():
             file.write(posts)
     
     console.print(f"✅ Output saved to [bold green]{output_file}[/bold green]", style="bold yellow")
-
+    
 if __name__ == "__main__":
     cli_entry()
