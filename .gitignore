@@ -3,4 +3,5 @@
 __pycache__/
 *.html
 *.txt
-Reddit_Fetch.egg-info
+Reddit_Fetch.egg-info/
+venv/
