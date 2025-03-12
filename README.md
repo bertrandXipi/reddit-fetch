@@ -208,6 +208,7 @@ This allows integration with other Python projects and custom automation.
 - **RSS Feed Generation for Hoarder**.
 - **Content summarization using AI**.
 - **Improved retry mechanisms for API errors**.
+- **Docker Support**.
 
 ---
 
