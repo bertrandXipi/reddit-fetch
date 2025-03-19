@@ -5,3 +5,5 @@ __pycache__/
 *.txt
 Reddit_Fetch.egg-info/
 venv/
+*.bk
+test.py
