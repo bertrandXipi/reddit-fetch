@@ -212,9 +212,17 @@ cp tokens.json data/
 
 ## 🔍 Future Enhancements
 
+<<<<<<< HEAD
 - **Advanced Filtering** (by subreddit, date, etc.).
 - **RSS Feed Generation** for easier integration.
 - **Direct API Integration with Linkwarden**.
+=======
+- **Direct API integration with Linkwarden**.
+- **RSS Feed Generation for Hoarder**.
+- **Content summarization using AI**.
+- **Improved retry mechanisms for API errors**.
+- **Docker Support**.
+>>>>>>> 6f8c39ef51cf967908973bcfa1328cd6b7bb0651
 
 ---
 
