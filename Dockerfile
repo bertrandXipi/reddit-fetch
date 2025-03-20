@@ -5,12 +5,11 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt ./
+# Copy the rest of the application code
+COPY . .
 # Install dependencies with optimizations
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -e .
-
-# Copy the rest of the application code
-COPY . .
 
 # Set environment variable to detect Docker runtime
 ENV DOCKER=1  
