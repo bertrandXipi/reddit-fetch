@@ -5,23 +5,23 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies with optimizations
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -e .
 
-# Copy the application code
+# Copy the rest of the application code
 COPY . .
 
-# Install the package in editable mode
-RUN pip install --no-cache-dir -e .
-
-# Set environment variables (configurable)
+# Set environment variable to detect Docker runtime
 ENV DOCKER=1  
-ENV FETCH_INTERVAL=3600
-ENV OUTPUT_FORMAT=json
-ENV FORCE_FETCH=false
 
-# Set up a volume for data storage
+# Define a persistent volume for data storage
 VOLUME ["/data"]
 
+# Default environment variables (override via Docker CLI or Compose)
+ENV OUTPUT_FORMAT="json"
+ENV FETCH_INTERVAL="3600"
+ENV FORCE_FETCH="true"
 # Ensure correct variable expansion and better log output in CMD
 CMD ["sh", "-c", "\
       echo \"⏳ Fetching Reddit saved posts in ${OUTPUT_FORMAT} format...\" && \

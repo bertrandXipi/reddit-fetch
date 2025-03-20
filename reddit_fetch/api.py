@@ -35,14 +35,9 @@ def make_request(endpoint):
             console.print("🔄 [yellow]Access token expired, refreshing...[/yellow]")
             new_access_token = refresh_access_token_safe()
             if not new_access_token:
-                console.print("❌ [bold red]Refresh token failed, re-authenticating...[/bold red]")
-                tokens = refresh_access_token_safe()
-                if not tokens:
-                    console.print("❌ [bold red]Re-authentication failed. Exiting...[/bold red]")
-                    return None
-                access_token = tokens.get("access_token")
-
-            headers["Authorization"] = f"Bearer {access_token}"
+                console.print("❌ [bold red]Refresh token failed, manual re-authentication needed.[/bold red]")
+                return None
+            headers["Authorization"] = f"Bearer {new_access_token}"
             response = requests.get(url, headers=headers)
 
         if response.status_code == 200:
@@ -54,7 +49,7 @@ def make_request(endpoint):
             exponential_backoff(attempt)
 
         else:
-            console.print(f"❌ [bold red]Error: {response.status_code} - {response.text}[/bold red]")
+            console.print(f"❌ [bold red]Error {response.status_code}: {response.reason}[/bold red]")
             return None
 
     return None

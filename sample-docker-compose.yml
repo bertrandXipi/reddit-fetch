@@ -10,5 +10,5 @@ services:
       - DOCKER=1
       - FETCH_INTERVAL=86400 #In seconds, configurable
       - OUTPUT_FORMAT=json #Choose between html or json
-      - FORCE_FETCH=false #Force fetch all the posts or fetch delta from the last fetch
+      - FORCE_FETCH=true #Force fetch all the posts or fetch delta from the last fetch
     restart: unless-stopped
