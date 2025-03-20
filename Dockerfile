@@ -18,11 +18,6 @@ ENV DOCKER=1
 ENV FETCH_INTERVAL=3600
 ENV OUTPUT_FORMAT=json
 ENV FORCE_FETCH=false
-ENV FULL_FETCH=false
-ENV REDDIT_CALLBACK_PORT=8080
-
-# Expose the authentication port (configurable at runtime)
-EXPOSE ${REDDIT_CALLBACK_PORT:-8080}
 
 # Set up a volume for data storage
 VOLUME ["/data"]
