@@ -4,14 +4,11 @@ services:
   reddit-fetcher:
     build: .
     container_name: reddit-fetcher
-    ports:
-      - "${REDDIT_CALLBACK_PORT:-8080}:${REDDIT_CALLBACK_PORT:-8080}"
     volumes:
       - ./data:/data
     environment:
       - DOCKER=1
       - FETCH_INTERVAL=86400 #In seconds, configurable
       - OUTPUT_FORMAT=json #Choose between html or json
-      - REDDIT_CALLBACK_PORT=${REDDIT_CALLBACK_PORT:-8080} # Uses port 8080 by default, configurable
-      - FORCE_FETCH=true #Force fetch all the posts or fetch delta from the last fetch
+      - FORCE_FETCH=false #Force fetch all the posts or fetch delta from the last fetch
     restart: unless-stopped
