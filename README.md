@@ -48,8 +48,6 @@ If you are using only a **browser-based system** and do not need Docker or a hea
    REDIRECT_URI=http://localhost:8080
    USER_AGENT=YourRedditApp/1.0 (by /u/your_username)
    REDDIT_USERNAME=your_reddit_username
-   FETCH_INTERVAL=3600
-   FORCE_FETCH=false
    ```
 
 5. **Generate authentication tokens**
