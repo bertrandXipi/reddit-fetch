@@ -175,9 +175,10 @@ services:
     container_name: reddit-fetcher
     env_file: .env
     environment:
-      - OUTPUT_FORMAT=json #or html
-      - FORCE_FETCH=false #or true if needed to force fetch everytime
-      - FETCH_INTERVAL=3600 #In seconds
+      - DOCKER=1
+      - FETCH_INTERVAL=86400 #In seconds, configurable
+      - OUTPUT_FORMAT=json #Choose between html or json
+      - FORCE_FETCH=true #Force fetch all the posts or fetch delta from the last fetch
     volumes:
       - ./data:/data
     restart: unless-stopped
