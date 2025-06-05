@@ -76,17 +76,17 @@ If you need to run the fetcher on a headless system, follow these additional ste
 
 2. Follow **Steps 2–5** above on the **browser-based system** to generate `tokens.json`.
 
-3. **Copy `tokens.json` to the headless system**:
+3. **Copy `tokens.json` and `.env` to the headless system**:
    ```bash
-   scp tokens.json user@headless-server:/path/to/Reddit-Fetch/
+   scp tokens.json .env user@headless-server:/path/to/Reddit-Fetch/
    ```
 
-4. On the headless system, run the script:
+4. On the headless system, ensure the following variables are available and run the script:
    ```bash
    reddit-fetcher
    ```
 
-✔️ No need for `.env` on the headless system—just copy `tokens.json`!
+✔️ `CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI`, `USER_AGENT`, and `REDDIT_USERNAME` must be provided alongside `tokens.json`.
 
 ---
 
@@ -173,6 +173,7 @@ services:
   reddit-fetcher:
     image: pandeyak/reddit-fetcher:latest  # Use prebuilt image
     container_name: reddit-fetcher
+    env_file: .env
     environment:
       - OUTPUT_FORMAT=json
       - FORCE_FETCH=false
@@ -182,6 +183,16 @@ services:
     restart: unless-stopped
 ```
 For a locally built image, replace `pandeyak/reddit-fetcher:latest` with `reddit-fetcher`.
+
+Create a `.env` file with your Reddit credentials:
+
+```ini
+CLIENT_ID=your_client_id
+CLIENT_SECRET=your_client_secret
+REDIRECT_URI=http://localhost:8080
+USER_AGENT=YourRedditApp/1.0 (by /u/your_username)
+REDDIT_USERNAME=your_reddit_username
+```
 
 ---
 
