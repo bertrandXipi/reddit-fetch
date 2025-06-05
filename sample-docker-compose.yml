@@ -4,6 +4,7 @@ services:
   reddit-fetcher:
     build: .
     container_name: reddit-fetcher
+    env_file: .env
     volumes:
       - ./data:/data
     environment:
