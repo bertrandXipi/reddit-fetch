@@ -175,9 +175,9 @@ services:
     container_name: reddit-fetcher
     env_file: .env
     environment:
-      - OUTPUT_FORMAT=json
-      - FORCE_FETCH=false
-      - FETCH_INTERVAL=3600
+      - OUTPUT_FORMAT=json #or html
+      - FORCE_FETCH=false #or true if needed to force fetch everytime
+      - FETCH_INTERVAL=3600 #In seconds
     volumes:
       - ./data:/data
     restart: unless-stopped
