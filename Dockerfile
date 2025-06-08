@@ -1,30 +1,43 @@
-# Use a lightweight Python image
-FROM python:3.10-alpine
+# Use the latest Python Alpine image with recent security patches
+FROM python:3.11-alpine3.19
+
+# Update package lists and upgrade all packages to patch vulnerabilities
+RUN apk update && apk upgrade --no-cache
+
+# Upgrade pip to latest version for security fixes
+RUN pip install --upgrade pip
 
 WORKDIR /app
 
-# Install dependencies
+# Copy requirements first for better Docker layer caching
 COPY requirements.txt ./
+
+# Install Python dependencies (no build tools needed for these packages)
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Copy the rest of the application code
 COPY . .
-# Install dependencies with optimizations
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -e .
 
-# Set environment variable to detect Docker runtime
-ENV DOCKER=1  
+# Install the application
+RUN pip install --no-cache-dir -e .
+
+# Set environment variables
+ENV DOCKER=1
+ENV OUTPUT_FORMAT="json"
+ENV FETCH_INTERVAL="86400"
+ENV FORCE_FETCH="false"
+
+# Create data directory
+RUN mkdir -p /data && chmod 755 /data
 
 # Define a persistent volume for data storage
 VOLUME ["/data"]
 
-# Default environment variables (override via Docker CLI or Compose)
-ENV OUTPUT_FORMAT="json"
-ENV FETCH_INTERVAL="3600"
-ENV FORCE_FETCH="true"
-# Ensure correct variable expansion and better log output in CMD
-CMD ["sh", "-c", "\
-      echo \"⏳ Fetching Reddit saved posts in ${OUTPUT_FORMAT} format...\" && \
-      reddit-fetcher --format \"${OUTPUT_FORMAT}\" && \
-      echo \"✅ Fetch complete. Sleeping for ${FETCH_INTERVAL} seconds...\" && \
-      sleep ${FETCH_INTERVAL}\
-    "]
+# Ensure clean line endings and permissions
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
+    sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh
+
+
+# Use the startup script as entrypoint
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
