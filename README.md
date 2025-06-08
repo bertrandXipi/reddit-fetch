@@ -1,222 +1,395 @@
+
 # Reddit Saved Posts Fetcher
 
-## Overview
+Automatically fetch and export your saved Reddit posts and comments to JSON or HTML format.
 
-This script fetches your **saved Reddit posts and comments** using the Reddit API with OAuth authentication. It supports exporting saved posts in **JSON** and **HTML bookmarks**, making it easy to archive and integrate with tools like [**Linkwarden**](https://github.com/linkwarden/linkwarden) and [**Hoarder**](https://github.com/hoarder-app/hoarder).
+## Features
 
-### Key Features
-
-- **Incremental Fetching** – Retrieves only new saved posts using `before` (incremental) or `after` (full fetch).
-- **JSON-First Approach** – Data is always stored in JSON first, ensuring correct ordering.
-- **Multiple Export Formats** – Supports **JSON and HTML bookmarks**.
-- **Python Library Support** – Can be used as a function call in external programs.
-- **Docker Support** – Easily deploy and run the fetcher in a containerized environment.
-- **Force Fetch Mode** – Optionally re-fetch all saved posts using `--force-fetch`.
-- **Deduplication Mechanism** – Ensures unique entries using the `fullname` identifier.
+* **Incremental Sync** - Only fetches new posts since last run
+* **Force Fetch** - Option to re-download all saved posts
+* **Multiple Formats** - Export to JSON or HTML bookmarks
+* **Docker Support** - Easy containerized deployment
+* **Smart Authentication** - Handles token refresh automatically
 
 ---
 
-## Installation & Setup
+## Prerequisites
 
-### 1. Running Locally (Browser-Based Systems)
-If you are using only a **browser-based system** and do not need Docker or a headless setup, follow these steps:
+### Get Reddit API Credentials
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/akashpandey/Reddit-Fetch.git
-   cd Reddit-Fetch
-   ```
-
-2. **Install as a Python package**
-   ```bash
-   pip install -e .
-   ```
-
-3. **Get Reddit API Credentials**
-   - Go to [https://www.reddit.com/prefs/apps](https://www.reddit.com/prefs/apps)
-   - Click **Create App** or **Create Another App**.
-   - Select **Web App**.
-   - Fill in:
-     - **Name**: Choose any app name.
-     - **Redirect URI**: Use `http://localhost:8080`
-   - After creation, copy the **Client ID** (just below the app name) and **Client Secret**.
-
-4. **Create a `.env` file**
-   ```ini
-   CLIENT_ID=your_client_id
-   CLIENT_SECRET=your_client_secret
-   REDIRECT_URI=http://localhost:8080
-   USER_AGENT=YourRedditApp/1.0 (by /u/your_username)
-   REDDIT_USERNAME=your_reddit_username
-   ```
-
-5. **Generate authentication tokens**
-   ```bash
-   python generate_tokens.py
-   ```
-   This will create `tokens.json` **inside the cloned repo**.
-
-6. **Run the script**
-   ```bash
-   reddit-fetcher
-   ```
-
-✔️ No need to copy `tokens.json` anywhere – everything runs on the same machine.
+1. Go to [Reddit Apps](https://www.reddit.com/prefs/apps)
+2. Click **"Create App"** or **"Create Another App"**
+3. Fill out the form:
+   * **Name** : `My Reddit Fetcher` (or any name)
+   * **App type** : Select **"web app"**
+   * **Redirect URI** : `http://localhost:8080`
+4. Click **"Create app"**
+5. Copy your **Client ID** (under the app name) and **Client Secret**
 
 ---
 
-### 2. Running on Both Browser and Headless Systems
-If you need to run the fetcher on a headless system, follow these additional steps:
+## Usage Methods
 
-1. Clone the repository on **both** systems:
-   ```bash
-   git clone https://github.com/akashpandey/Reddit-Fetch.git
-   cd Reddit-Fetch
-   ```
+Choose one of these three methods:
 
-2. Follow **Steps 2–5** above on the **browser-based system** to generate `tokens.json`.
+## Method 1: CLI Script (Local Development)
 
-3. **Copy `tokens.json` and `.env` to the headless system**:
-   ```bash
-   scp tokens.json .env user@headless-server:/path/to/Reddit-Fetch/
-   ```
+ **Best for** : Testing, development, one-time use
 
-4. On the headless system, ensure the following variables are available and run the script:
-   ```bash
-   reddit-fetcher
-   ```
-
-✔️ `CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI`, `USER_AGENT`, and `REDDIT_USERNAME` must be provided alongside `tokens.json`.
-
----
-
-## Authentication & Token Handling
-
-### For Docker-Based Execution
-- Generate `tokens.json` on a browser-based system (see above).
-- Place `tokens.json` inside `/data/` before starting the container.
+### Setup
 
 ```bash
-cp tokens.json data/
-docker run -v $(pwd)/data:/data pandeyak/reddit-fetcher:latest
+git clone https://github.com/your-username/Reddit-Fetch.git
+cd Reddit-Fetch
+pip install -e .
 ```
 
----
+### Configure
 
-## Running the Script
+Create a `.env` file:
 
-### Execution Methods Overview
+```ini
+CLIENT_ID=your_client_id_here
+CLIENT_SECRET=your_client_secret_here
+REDIRECT_URI=http://localhost:8080
+USER_AGENT=RedditFetcher/1.0 (by /u/your_reddit_username)
+REDDIT_USERNAME=your_reddit_username
+```
 
-| Method                        | Command                                                                 | Best For               |
-|------------------------------|-------------------------------------------------------------------------|------------------------|
-| CLI (Interactive)            | `reddit-fetcher`                                                        | Manual use             |
-| Python Function              | `fetch_saved_posts(format="json")`                                    | Integration in code    |
-| Docker (Prebuilt Image)      | `docker run -e OUTPUT_FORMAT=json -v $(pwd)/data:/data pandeyak/reddit-fetcher:latest` | Quick deployment       |
-| Docker (Built from Source)   | `docker run -e OUTPUT_FORMAT=json -v $(pwd)/data:/data reddit-fetcher` | Custom modifications   |
-
-### Force Fetch (Re-Fetch Everything)
+### Authenticate
 
 ```bash
-reddit-fetcher --force-fetch
+python generate_tokens.py
 ```
 
----
+This opens your browser to authorize the app and creates `tokens.json`.
 
-## Using as a Python Library
+### Run
 
-### Expected Return Type
-Returns a list of dictionaries, where each entry contains:
-
-```json
-[
-    {
-        "title": "Post Title",
-        "url": "https://reddit.com/r/example",
-        "subreddit": "example",
-        "created_utc": 1700000000,
-        "fullname": "t3_xxxxxx"
-    }
-]
-```
-
-### Sample External Program Usage
-```python
-from reddit_fetch.api import fetch_saved_posts
-
-data = fetch_saved_posts(format="json", force_fetch=False)
-print(f"Fetched {len(data)} saved posts")
-```
-
----
-
-## Running in Docker
-
-### Using the Prebuilt Docker Image
 ```bash
-docker run --rm -e OUTPUT_FORMAT=json -e FETCH_INTERVAL=3600 -v $(pwd)/data:/data pandeyak/reddit-fetcher:latest
+# Interactive mode
+reddit-fetcher
+
+# Non-interactive mode
+OUTPUT_FORMAT=json FORCE_FETCH=false reddit-fetcher
 ```
 
-### Building Docker Image from Source
+---
+
+## Method 2: Build Your Own Docker Image
+
+ **Best for** : Custom modifications, self-hosted environments
+
+### Step 1: Prepare Authentication (on a computer with browser)
+
+```bash
+git clone https://github.com/your-username/Reddit-Fetch.git
+cd Reddit-Fetch
+pip install -e .
+```
+
+Create `.env` file:
+
+```ini
+CLIENT_ID=your_client_id_here
+CLIENT_SECRET=your_client_secret_here
+REDIRECT_URI=http://localhost:8080
+USER_AGENT=RedditFetcher/1.0 (by /u/your_reddit_username)
+REDDIT_USERNAME=your_reddit_username
+```
+
+Generate tokens:
+
+```bash
+python generate_tokens.py
+```
+
+### Step 2: Build Docker Image
+
 ```bash
 docker build -t reddit-fetcher .
 ```
 
-### Running Locally with the Built Image
+### Step 3: Prepare Files for Container
+
 ```bash
-docker run --rm -e OUTPUT_FORMAT=json -e FETCH_INTERVAL=3600 -v $(pwd)/data:/data reddit-fetcher
+# Create data directory
+mkdir -p ./data
+
+# Copy authentication tokens
+cp tokens.json ./data/
 ```
 
-### Using Docker Compose
+### Step 4: Run Container
+
+```bash
+# One-time run
+docker run --rm \
+  --env-file .env \
+  -e OUTPUT_FORMAT=json \
+  -e FORCE_FETCH=false \
+  -v $(pwd)/data:/data \
+  reddit-fetcher
+
+# Or use docker-compose.yml
+docker-compose up -d
+```
+
+**docker-compose.yml:**
+
 ```yaml
 version: '3.8'
 services:
   reddit-fetcher:
-    image: pandeyak/reddit-fetcher:latest  # Use prebuilt image
+    build: .  # Builds from local Dockerfile
     container_name: reddit-fetcher
     env_file: .env
     environment:
       - DOCKER=1
-      - FETCH_INTERVAL=86400 #In seconds, configurable
-      - OUTPUT_FORMAT=json #Choose between html or json
-      - FORCE_FETCH=true #Force fetch all the posts or fetch delta from the last fetch
+      - FETCH_INTERVAL=86400  # Run every 24 hours
+      - OUTPUT_FORMAT=json
+      - FORCE_FETCH=false
     volumes:
       - ./data:/data
     restart: unless-stopped
 ```
-For a locally built image, replace `pandeyak/reddit-fetcher:latest` with `reddit-fetcher`.
 
-Create a `.env` file with your Reddit credentials:
+---
+
+## Method 3: Use Pre-built Docker Image (Recommended)
+
+ **Best for** : Production use, quick deployment, automated scheduling
+
+### Step 1: Prepare Authentication (on a computer with browser)
+
+ **⚠️ Important** : You must do this step on a computer with a web browser first.
+
+```bash
+git clone https://github.com/your-username/Reddit-Fetch.git
+cd Reddit-Fetch
+pip install -e .
+```
+
+Create `.env` file:
 
 ```ini
-CLIENT_ID=your_client_id
-CLIENT_SECRET=your_client_secret
+CLIENT_ID=your_client_id_here
+CLIENT_SECRET=your_client_secret_here
 REDIRECT_URI=http://localhost:8080
-USER_AGENT=YourRedditApp/1.0 (by /u/your_username)
+USER_AGENT=RedditFetcher/1.0 (by /u/your_reddit_username)
 REDDIT_USERNAME=your_reddit_username
 ```
+
+Generate authentication tokens:
+
+```bash
+python generate_tokens.py
+```
+
+### Step 2: Prepare Docker Environment
+
+**Copy files to your Docker server:**
+
+```bash
+# Create project directory
+mkdir reddit-fetcher-docker
+cd reddit-fetcher-docker
+
+# Copy .env file to project directory
+cp /path/to/Reddit-Fetch/.env .
+
+# Create data directory and copy tokens
+mkdir data
+cp /path/to/Reddit-Fetch/tokens.json ./data/
+```
+
+### Step 3: Create docker-compose.yml
+
+```yaml
+version: '3.8'
+services:
+  reddit-fetcher:
+    image: pandeyak/reddit-fetcher:latest  # Pre-built image from Docker Hub
+    container_name: reddit-fetcher
+    env_file: .env  # Loads Reddit API credentials
+    environment:
+      - DOCKER=1
+      - FETCH_INTERVAL=86400  # Run every 24 hours (in seconds)
+      - OUTPUT_FORMAT=json    # Choose: json or html
+      - FORCE_FETCH=false     # Set to true to fetch all posts
+    volumes:
+      - ./data:/data  # Maps local data directory to container
+    restart: unless-stopped
+```
+
+### Step 4: Run
+
+```bash
+# Start the container
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop the container
+docker-compose down
+```
+
+### File Structure for Method 3:
+
+```
+reddit-fetcher-docker/
+├── docker-compose.yml
+├── .env                    # Reddit API credentials
+└── data/
+    ├── tokens.json         # Authentication tokens (copied from Step 1)
+    ├── saved_posts.json    # Output file (generated)
+    └── last_fetch.json     # Tracking file (generated)
+```
+
+---
+
+## Configuration Options
+
+### Environment Variables
+
+| Variable            | Description                          | Default                   | Required |
+| ------------------- | ------------------------------------ | ------------------------- | -------- |
+| `CLIENT_ID`       | Reddit app client ID                 | -                         | ✅       |
+| `CLIENT_SECRET`   | Reddit app client secret             | -                         | ✅       |
+| `REDIRECT_URI`    | OAuth redirect URI                   | `http://localhost:8080` | ✅       |
+| `USER_AGENT`      | Reddit API user agent                | -                         | ✅       |
+| `REDDIT_USERNAME` | Your Reddit username                 | -                         | ✅       |
+| `OUTPUT_FORMAT`   | Export format:`json`or `html`    | `json`                  | ❌       |
+| `FORCE_FETCH`     | Fetch all posts:`true`or `false` | `false`                 | ❌       |
+| `FETCH_INTERVAL`  | Seconds between runs (Docker only)   | `86400`                 | ❌       |
+
+### Docker-specific Commands
+
+```bash
+# One-time run with pre-built image
+docker run --rm \
+  --env-file .env \
+  -e OUTPUT_FORMAT=json \
+  -e FORCE_FETCH=false \
+  -v $(pwd)/data:/data \
+  pandeyak/reddit-fetcher:latest
+
+# Force fetch all posts
+docker run --rm \
+  --env-file .env \
+  -e FORCE_FETCH=true \
+  -v $(pwd)/data:/data \
+  pandeyak/reddit-fetcher:latest
+```
+
+---
+
+## Using as Python Library
+
+```python
+from reddit_fetch.api import fetch_saved_posts
+
+# Fetch new posts in JSON format
+result = fetch_saved_posts(format="json", force_fetch=False)
+print(f"Found {result['count']} new posts")
+
+# Access the posts
+posts = result['content']
+for post in posts:
+    print(f"- {post['title']} (r/{post['subreddit']})")
+```
+
+---
+
+## Output Files
+
+### JSON Format (`saved_posts.json`)
+
+```json
+[
+  {
+    "title": "Amazing post title",
+    "url": "https://reddit.com/r/example/...",
+    "subreddit": "example",
+    "created_utc": 1649123456,
+    "fullname": "t3_abc123",
+    "type": "post",
+    "author": "username",
+    "score": 42
+  }
+]
+```
+
+### HTML Format (`saved_posts.html`)
+
+Beautiful HTML file with styled bookmarks, perfect for importing into bookmark managers.
 
 ---
 
 ## Troubleshooting
 
-### Token Errors
-- If `tokens.json` is missing, run `generate_tokens.py` again.
-- Ensure Reddit API credentials are correctly set in `.env`.
-- If using Docker, copy `tokens.json` to `/data/` before running the container.
+### Authentication Issues
 
-### Fetching Issues
-- Ensure the correct Reddit username is set in `.env`.
-- Check if you've hit Reddit API rate limits.
+**Error: "No authentication tokens found"**
+
+* **CLI** : Make sure `tokens.json` exists in project directory
+* **Docker** : Ensure `tokens.json` is in the `data/` directory
+* **Solution** : Regenerate tokens with `python generate_tokens.py`
+
+**Error: "Failed to refresh access token"**
+
+* Delete `tokens.json` and regenerate tokens
+* Check that your Reddit app credentials are correct
+
+### Docker Issues
+
+**Error: "Cannot open web browser" in Docker**
+
+* This is expected! Docker containers can't open browsers
+* You must generate tokens on a computer with a browser first (Step 1)
+
+**Error: "Permission denied" in Docker**
+
+* Fix file permissions: `chmod 644 tokens.json .env`
+* Fix directory permissions: `chmod 755 data/`
+
+**Error: "File not found" in Docker**
+
+* Verify file structure matches the example above
+* Ensure `.env` and `tokens.json` are in correct locations
+
+### General Issues
+
+**"No new posts found"**
+
+* Check if you have new saved posts on Reddit
+* Try force fetch: Set `FORCE_FETCH=true`
+* Verify `REDDIT_USERNAME` in `.env` is correct
+
+**"Headless system detected" on desktop**
+
+* Override detection: `REDDIT_FETCHER_HEADLESS=false reddit-fetcher`
 
 ---
 
-## Future Enhancements
+## Method Comparison
 
-- Advanced Filtering (by subreddit, date, etc.)
-- RSS Feed Generation for easier integration
-- Direct API Integration with Linkwarden
+| Feature                   | CLI Script      | Build Docker  | Pre-built Docker |
+| ------------------------- | --------------- | ------------- | ---------------- |
+| **Setup Time**      | Fast            | Medium        | Fast             |
+| **Customization**   | Full            | Full          | Limited          |
+| **Dependencies**    | Python required | Docker only   | Docker only      |
+| **Auto-scheduling** | Manual/cron     | Built-in      | Built-in         |
+| **Updates**         | Git pull        | Rebuild image | Pull new image   |
+| **Best for**        | Development     | Custom needs  | Production       |
 
 ---
 
-**Contributions & feedback are welcome!**
+## Contributing
 
+Contributions welcome! Please feel free to submit issues and pull requests.
+
+## License
+
+MIT License - see LICENSE file for details.
