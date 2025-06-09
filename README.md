@@ -372,11 +372,7 @@ The HTML format creates a clean, Reddit-inspired webpage with your saved posts:
 <div style="border: 2px solid #ddd; border-radius: 8px; padding: 10px; background: #f9f9f9; margin: 10px 0;">
 
 **Preview of saved_posts.html:**
-
-![HTML Output Preview]
 ![image](https://github.com/user-attachments/assets/e49bbb7f-6aac-4fb7-9262-9d10c04f7da8)
-
-
 </div>
 
 **Features of HTML output:**
