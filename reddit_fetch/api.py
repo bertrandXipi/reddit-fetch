@@ -115,6 +115,27 @@ def make_request(endpoint):
     console.print("❌ [bold red]Max retry attempts reached.[/bold red]")
     return None
 
+def fetch_comments_for_post(post_id):
+    """Fetch top-level comments for a given post ID."""
+    console.print(f"    \_ 💬 [dim]Fetching comments for post {post_id}...[/dim]")
+    endpoint = f"/comments/{post_id.split('_')[1]}?limit=100"  # Use post ID for comments
+    comments_data = make_request(endpoint)
+    
+    comments = []
+    if comments_data and isinstance(comments_data, list) and len(comments_data) > 1:
+        for comment in comments_data[1]["data"]["children"]:
+            if "data" not in comment or "body" not in comment["data"]:
+                continue # Skip non-comment entries
+            
+            comment_data = comment["data"]
+            comments.append({
+                "author": comment_data.get("author", "[deleted]"),
+                "body": comment_data.get("body", ""),
+                "score": comment_data.get("score", 0)
+            })
+    time.sleep(0.5) # Be nice to the API
+    return comments
+
 def fetch_saved_posts(format="json", force_fetch=False):
     """Fetch saved Reddit posts, using `after` for full fetch and `before` for incremental fetch.
     
@@ -207,16 +228,19 @@ def fetch_saved_posts(format="json", force_fetch=False):
             post_type = "post" if data.get("title") else "comment"
             
             if post_type == "post":
-                new_posts.append({
+                post_data = {
                     "title": data.get("title", "No Title"),
                     "url": data.get("url", f"https://reddit.com{data.get('permalink', '#')}"),
                     "subreddit": data.get("subreddit"),
                     "created_utc": data.get("created_utc"),
-                    "fullname": data["name"],  # Store Reddit's unique identifier
+                    "fullname": data["name"],
                     "type": "post",
                     "author": data.get("author", "[deleted]"),
-                    "score": data.get("score", 0)
-                })
+                    "score": data.get("score", 0),
+                    "selftext": data.get("selftext", ""),
+                    "comments": fetch_comments_for_post(data["name"])
+                }
+                new_posts.append(post_data)
             else:
                 # Handle saved comments
                 new_posts.append({
@@ -228,7 +252,7 @@ def fetch_saved_posts(format="json", force_fetch=False):
                     "type": "comment",
                     "author": data.get("author", "[deleted]"),
                     "score": data.get("score", 0),
-                    "body": data.get("body", "")[:200] + "..." if len(data.get("body", "")) > 200 else data.get("body", "")
+                    "body": data.get("body", "")
                 })
             
             posts_found_this_page += 1
