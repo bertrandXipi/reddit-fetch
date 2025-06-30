@@ -193,12 +193,11 @@ def fetch_saved_posts(format: str = "json", force_fetch: bool = False) -> dict:
                 })
         console.print(f"[bold green]Fetched {len(posts_data)} saved posts and comments from Reddit.[/bold green]")
 
-        # Save to JSON for subsequent runs if not exporting to Google Sheet directly
-        if format != "google_sheet":
-            os.makedirs(DATA_DIR, exist_ok=True)
-            with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-                json.dump(posts_data, f, indent=4)
-            console.print(f"[bold green]Saved {len(posts_data)} posts to {OUTPUT_JSON}.[/bold green]")
+        # Always save to JSON
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+            json.dump(posts_data, f, indent=4)
+        console.print(f"[bold green]Saved {len(posts_data)} posts to {OUTPUT_JSON}.[/bold green]")
 
         if format == "google_sheet":
             spreadsheet_name = os.getenv("GOOGLE_SHEET_NAME")
