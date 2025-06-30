@@ -2,13 +2,15 @@ import os
 import json
 import requests
 import time
+import gspread
+from google.oauth2 import service_account
 from reddit_fetch.auth import load_tokens_safe, refresh_access_token_safe
-from reddit_fetch.config import USER_AGENT, REDDIT_USERNAME, exponential_backoff
+from reddit_fetch.config import USER_AGENT, REDDIT_USERNAME, GOOGLE_SERVICE_ACCOUNT_KEY_PATH, exponential_backoff
 from rich.console import Console
 
 console = Console()
 
-DATA_DIR = "/data/" if os.getenv("DOCKER", "0") == "1" else "./"
+DATA_DIR = "data/"
 LAST_FETCH_FILE = f"{DATA_DIR}last_fetch.json"
 OUTPUT_JSON = f"{DATA_DIR}saved_posts.json"
 OUTPUT_HTML = f"{DATA_DIR}saved_posts.html"
@@ -115,9 +117,82 @@ def make_request(endpoint):
     console.print("❌ [bold red]Max retry attempts reached.[/bold red]")
     return None
 
+def export_to_google_sheet(posts_list, spreadsheet_name="Reddit Saved Posts", worksheet_name="Saved Posts"):
+    """Exports a list of Reddit posts to a Google Sheet."""
+    if not GOOGLE_SERVICE_ACCOUNT_KEY_PATH:
+        console.print("❌ [bold red]GOOGLE_SERVICE_ACCOUNT_KEY_PATH is not set in .env. Cannot export to Google Sheet.[/bold red]")
+        return False
+
+    try:
+        # Authenticate with Google Sheets
+        creds = service_account.Credentials.from_service_account_file(
+            GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
+            scopes=['https://www.googleapis.com/auth/drive']
+        )
+        gc = gspread.authorize(creds)
+
+        # Open the spreadsheet
+        try:
+            spreadsheet = gc.open(spreadsheet_name)
+        except gspread.exceptions.SpreadsheetNotFound:
+            console.print(f"⚠️ [yellow]Spreadsheet '{spreadsheet_name}' not found. Creating a new one.[/yellow]")
+            spreadsheet = gc.create(spreadsheet_name)
+            # Share the newly created spreadsheet with the service account email
+            # This is crucial if the spreadsheet was just created by the script
+            spreadsheet.share(creds.client_email, perm_type='user', role='writer')
+            console.print(f"✅ [green]Spreadsheet '{spreadsheet_name}' created and shared with service account.[/green]")
+            time.sleep(5) # Add a small delay for permissions to propagate
+
+        # Select the worksheet
+        try:
+            worksheet = spreadsheet.worksheet(worksheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            console.print(f"⚠️ [yellow]Worksheet '{worksheet_name}' not found. Creating a new one.[/yellow]")
+            worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows="100", cols="20")
+            console.print(f"✅ [green]Worksheet '{worksheet_name}' created.[/green]")
+
+        # Prepare data for Google Sheet
+        headers = [
+            "Title", "URL", "Subreddit", "Author", "Score", "Type",
+            "Created UTC", "Selftext", "Comments"
+        ]
+        data_rows = []
+        for post in posts_list:
+            comments_str = ""
+            if post.get("comments"):
+                comments_list = []
+                for comment in post["comments"]:
+                    comments_list.append(f"u/{comment.get('author', '[deleted]')}: {comment.get('body', '')} (Score: {comment.get('score', 0)})")
+                comments_str = "\n\n".join(comments_list) # Use \n\n for new lines in Google Sheets
+
+            data_rows.append([
+                post.get("title", ""),
+                post.get("url", ""),
+                post.get("subreddit", ""),
+                post.get("author", ""),
+                post.get("score", 0),
+                post.get("type", ""),
+                post.get("created_utc", 0),
+                post.get("selftext", ""),
+                comments_str
+            ])
+
+        # Clear existing content and write new data
+        worksheet.clear()
+        worksheet.append_row(headers)
+        worksheet.append_rows(data_rows)
+
+        console.print(f"✅ [bold green]Successfully exported {len(posts_list)} posts to Google Sheet '{spreadsheet_name}' (Worksheet: '{worksheet_name}').[/bold green]")
+        return True
+
+    except Exception as e:
+        console.print(f"❌ [bold red]Error exporting to Google Sheet: {e}[/bold red]")
+        return False
+
 def fetch_comments_for_post(post_id):
+
     """Fetch top-level comments for a given post ID."""
-    console.print(f"    \_ 💬 [dim]Fetching comments for post {post_id}...[/dim]")
+    console.print(f"    _ 💬 [dim]Fetching comments for post {post_id}...[/dim]")
     endpoint = f"/comments/{post_id.split('_')[1]}?limit=100"  # Use post ID for comments
     comments_data = make_request(endpoint)
     
@@ -284,16 +359,22 @@ def fetch_saved_posts(format="json", force_fetch=False):
         last_fetched_before = new_posts[0]["fullname"] if fetch_mode == "before" else None
 
         try:
+            # Add human-readable timestamp
+            from datetime import datetime
+            human_readable_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             with open(LAST_FETCH_FILE, "w", encoding="utf-8") as file:
                 json.dump({
-                    "last_fetch": last_fetched_value, 
-                    "after": last_fetched_after, 
+                    "last_fetch": last_fetched_value,
+                    "after": last_fetched_after,
                     "before": last_fetched_before,
                     "timestamp": time.time(),
+                    "last_fetch_human": human_readable_time,
                     "total_fetched": len(new_posts)
                 }, file, indent=2)
 
             console.print(f"📌 Last fetch timestamp updated: {last_fetched_value}", style="bold cyan")
+            console.print(f"📌 Human-readable time: {human_readable_time}", style="bold cyan")
             console.print(f"📌 Last fetch `after` updated: {last_fetched_after if last_fetched_after else 'N/A'}", style="bold cyan")
             console.print(f"📌 Last fetch `before` updated: {last_fetched_before if last_fetched_before else 'N/A'}", style="bold cyan")
         except Exception as e:
@@ -332,6 +413,21 @@ def fetch_saved_posts(format="json", force_fetch=False):
                 "count": len(new_posts),  # Return count of NEW posts, not total
                 "format": "html"
             }
+        elif format == "google_sheet":
+            if GOOGLE_SHEET_NAME:
+                success = export_to_google_sheet(unique_posts_list, spreadsheet_name=GOOGLE_SHEET_NAME)
+                return {
+                    "content": "Export to Google Sheet " + ("successful" if success else "failed"),
+                    "count": len(new_posts),
+                    "format": "google_sheet"
+                }
+            else:
+                console.print("❌ [bold red]GOOGLE_SHEET_NAME is not set in .env. Cannot export to Google Sheet.[/bold red]")
+                return {
+                    "content": "GOOGLE_SHEET_NAME not set",
+                    "count": 0,
+                    "format": "google_sheet"
+                }
         else:  # JSON format
             return {
                 "content": unique_posts_list,
@@ -347,6 +443,12 @@ def fetch_saved_posts(format="json", force_fetch=False):
             "content": "<html><head><title>Saved Reddit Posts</title></head><body><p>No posts found.</p></body></html>",
             "count": 0,
             "format": "html"
+        }
+    elif format == "google_sheet":
+        return {
+            "content": "No new posts found to export to Google Sheet.",
+            "count": 0,
+            "format": "google_sheet"
         }
     else:
         return {

@@ -18,18 +18,8 @@ develop-eggs/
 .env
 .sample-env
 
-# Tokens
-tokens.json
-
-# Output files
-saved_posts.json
-saved_posts.html
-last_fetch.json
-
-# Docker
-.dockerignore
-docker-entrypoint.sh
-sample-docker-compose.yml
+# Data files
+data/
 
 # IDEs
 .idea/

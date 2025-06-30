@@ -1,11 +1,12 @@
 import os
 import json
 import sys
+import argparse # Import argparse
 
 import requests
-from reddit_fetch.api import fetch_saved_posts
+from reddit_fetch.api import fetch_saved_posts, export_to_google_sheet, OUTPUT_JSON # Import OUTPUT_JSON
 from reddit_fetch.auth import is_headless, is_docker, show_headless_instructions, load_tokens_safe
-from reddit_fetch.config import TOKEN_FILE
+from reddit_fetch.config import TOKEN_FILE, GOOGLE_SHEET_NAME # Import GOOGLE_SHEET_NAME
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.panel import Panel
@@ -13,7 +14,7 @@ from rich.text import Text
 
 console = Console()
 
-DATA_DIR = "/data/" if os.getenv("DOCKER", "0") == "1" else "./"
+DATA_DIR = "data/"
 LAST_FETCH_FILE = f"{DATA_DIR}last_fetch.json"
 
 def is_interactive():
@@ -69,6 +70,14 @@ def cli_entry():
     console.print("\n🚀 [bold cyan]Welcome to Reddit Saved Posts Fetcher![/bold cyan]", style="bold yellow")
     console.print("Fetch and save your Reddit saved posts easily.\n", style="italic green")
 
+    parser = argparse.ArgumentParser(description="Fetch and export Reddit saved posts.")
+    parser.add_argument(
+        "--export-only",
+        action="store_true",
+        help="Export existing saved_posts.json to Google Sheet without fetching from Reddit."
+    )
+    args = parser.parse_args()
+
     # Show environment information
     is_docker_env = is_docker()
     is_headless_env = is_headless()
@@ -78,12 +87,44 @@ def cli_entry():
     console.print(f"🖥️  Headless System: {'Yes' if is_headless_env else 'No'}", style="bold blue")
     console.print(f"💬 Interactive Session: {'Yes' if not is_non_interactive else 'No'}", style="bold magenta")
     
-    # Check authentication before proceeding
-    if not check_authentication():
-        # If we're here, we're on a browser system but tokens are missing/invalid
-        # The authentication will be handled by the API calls
-        pass
+    # Check authentication before proceeding (only if not export-only)
+    if not args.export_only:
+        if not check_authentication():
+            # If we're here, we're on a browser system but tokens are missing/invalid
+            # The authentication will be handled by the API calls
+            pass
     
+    if args.export_only:
+        console.print("🔄 [bold blue]Export-only mode activated. Reading from saved_posts.json...[/bold blue]")
+        if not os.path.exists(OUTPUT_JSON):
+            console.print(f"❌ [bold red]Error: {OUTPUT_JSON} not found. Cannot export without data.[/bold red]")
+            sys.exit(1)
+        
+        try:
+            with open(OUTPUT_JSON, "r", encoding="utf-8") as f:
+                posts_to_export = json.load(f)
+            console.print(f"✅ [green]Loaded {len(posts_to_export)} posts from {OUTPUT_JSON}.[/green]")
+            
+            if not GOOGLE_SHEET_NAME:
+                console.print("❌ [bold red]GOOGLE_SHEET_NAME is not set in .env. Cannot export to Google Sheet.[/bold red]")
+                sys.exit(1)
+
+            console.print(f"📡 [bold blue]Starting export to Google Sheet '{GOOGLE_SHEET_NAME}'[/bold blue]")
+            success = export_to_google_sheet(posts_to_export, spreadsheet_name=GOOGLE_SHEET_NAME)
+            
+            if success:
+                console.print("✅ [bold green]Export to Google Sheet completed successfully![/bold green]")
+            else:
+                console.print("❌ [bold red]Export to Google Sheet failed.[/bold red]")
+            sys.exit(0)
+            
+        except json.JSONDecodeError as e:
+            console.print(f"❌ [bold red]Error decoding {OUTPUT_JSON}: {e}. File might be corrupted.[/bold red]")
+            sys.exit(1)
+        except Exception as e:
+            console.print(f"❌ [bold red]An unexpected error occurred during export: {e}[/bold red]")
+            sys.exit(1)
+
     # Configure execution based on environment
     if is_docker_env or is_non_interactive:
         # Non-interactive mode - use environment variables
@@ -96,7 +137,7 @@ def cli_entry():
     else:
         # Interactive mode - ask user for preferences
         try:
-            format_choice = Prompt.ask("Select output format", choices=["json", "html"], default="json")
+            format_choice = Prompt.ask("Select output format", choices=["json", "html", "google_sheet"], default="json")
             force_fetch = Confirm.ask("Do you want to force fetch all saved posts?", default=False)
         except KeyboardInterrupt:
             console.print("\n👋 [yellow]Operation cancelled by user.[/yellow]")
@@ -132,7 +173,12 @@ def cli_entry():
         posts_count = result["count"]
         result_format = result["format"]
         
-        # Save the output
+        # If the format is google_sheet, the export is already handled by fetch_saved_posts
+        if result_format == "google_sheet":
+            console.print(f"\n✅ [bold green]Export to Google Sheet completed via fetch process.[/bold green]")
+            return
+
+        # Save the output for json/html
         output_file = f"{DATA_DIR}saved_posts.{result_format}"
         
         with open(output_file, "w", encoding="utf-8") as file:
@@ -178,7 +224,7 @@ def cli_entry():
         else:
             # This is likely a code/data structure error
             console.print(f"\n❌ [bold red]Data processing error: {e}[/bold red]")
-            console.print("🔧 [yellow]This may be a bug. Please check the error details above.[/yellow]")
+            console.print("🔧 [yellow]This may be a bug. Please check the error details above.[/blue]")
             console.print("💡 [blue]You can try using --force-fetch to start fresh.[/blue]")
         sys.exit(1)
     except Exception as e:
