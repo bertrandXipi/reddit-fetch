@@ -90,10 +90,8 @@ def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> boo
             'verticalAlignment': 'TOP'
         })
 
-        # Prepare data for insertion and notes
+        # Prepare data for insertion
         rows_to_insert = []
-        cells_to_update = [] # To store gspread.Cell objects for batch update
-        selftext_col_index = headers.index('Self Text') + 1 # gspread uses 1-based indexing for columns
 
         for i, post in enumerate(posts_data):
             date_saved = post.get('date_saved', '')
@@ -101,11 +99,6 @@ def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> boo
                 date_saved = datetime.fromtimestamp(date_saved).strftime('%Y-%m-%d %H:%M:%S')
             
             full_selftext = str(post.get('selftext', '')) # Ensure it's a string
-            truncated_selftext = full_selftext
-            if full_selftext:
-                words = full_selftext.split()
-                if len(words) > 20:
-                    truncated_selftext = ' '.join(words[:20]) + '...'
             
             row = [
                 post.get('title', ''),
@@ -114,17 +107,10 @@ def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> boo
                 post.get('permalink', ''),
                 post.get('url', ''),
                 date_saved,
-                truncated_selftext,
+                full_selftext, # Display full text directly
                 post.get('num_comments', '')
             ]
             rows_to_insert.append(row)
-
-            # Store full text for notes, if selftext is not empty
-            if full_selftext:
-                # Row index for notes starts from 2 (after header), plus current row index (i)
-                cell = gspread.Cell(row=i + 2, col=selftext_col_index, value=truncated_selftext)
-                cell.note = full_selftext
-                cells_to_update.append(cell)
 
         # Insert all data in one batch
         if rows_to_insert:
@@ -132,11 +118,6 @@ def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> boo
             console.print(f"[bold green]Succès:[/bold green] {len(rows_to_insert)} lignes de données insérées.")
         else:
             console.print("[bold yellow]Avertissement:[/bold yellow] Aucune donnée à insérer.")
-
-        # Update cells with notes in a batch
-        if cells_to_update:
-            worksheet.update_cells(cells_to_update)
-            console.print(f"[bold green]Succès:[/bold green] {len(cells_to_update)} notes ajoutées aux cellules de texte.")
 
         return True
 
