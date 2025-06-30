@@ -1,603 +1,240 @@
-import os
-import json
-import requests
-import time
 import gspread
 from google.oauth2 import service_account
-from reddit_fetch.auth import load_tokens_safe, refresh_access_token_safe
-from reddit_fetch.config import USER_AGENT, REDDIT_USERNAME, GOOGLE_SERVICE_ACCOUNT_KEY_PATH, exponential_backoff
+import os
 from rich.console import Console
+from dotenv import load_dotenv
+import json
+import requests
+from datetime import datetime
+import praw
+from reddit_fetch.auth import refresh_access_token_safe, load_tokens_safe, is_headless, show_headless_instructions # Import authentication functions
+
+# Load environment variables from .env file
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 console = Console()
 
 DATA_DIR = "data/"
-LAST_FETCH_FILE = f"{DATA_DIR}last_fetch.json"
 OUTPUT_JSON = f"{DATA_DIR}saved_posts.json"
-OUTPUT_HTML = f"{DATA_DIR}saved_posts.html"
 
-def get_valid_access_token():
-    """Gets a valid access token, refreshing if necessary."""
-    tokens = load_tokens_safe()
-    if not tokens:
-        console.print("❌ [bold red]No stored tokens found. Re-authenticating...[/bold red]")
-        access_token = refresh_access_token_safe()
-        if not access_token:
-            console.print("❌ [bold red]Re-authentication failed. Exiting...[/bold red]")
-            return None
-        return access_token
-    
-    # Check if access token exists
-    access_token = tokens.get("access_token")
-    if not access_token:
-        console.print("🔄 [yellow]No access token found, attempting to refresh...[/yellow]")
-        access_token = refresh_access_token_safe()
-        if not access_token:
-            console.print("❌ [bold red]Failed to get access token. Manual re-authentication needed.[/bold red]")
-            return None
-        return access_token
-    
-    # Check if access token is expired (if timestamp exists)
-    if "timestamp" in tokens:
-        time_elapsed = time.time() - tokens["timestamp"]
-        # Reddit access tokens typically expire after 3600 seconds (1 hour)
-        if time_elapsed > 3300:  # 55 minutes buffer
-            console.print("⏰ [yellow]Access token appears expired, refreshing...[/yellow]")
-            access_token = refresh_access_token_safe()
-            if not access_token:
-                console.print("❌ [bold red]Failed to refresh expired token.[/bold red]")
-                return None
-            return access_token
-    
-    return access_token
+def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> bool:
+    """
+    Exports a list of post data to a Google Sheet.
 
-def make_request(endpoint):
-    """Makes an API request to Reddit, handling authentication and errors."""
-    
-    access_token = get_valid_access_token()
-    if not access_token:
-        return None
-    
-    headers = {"Authorization": f"Bearer {access_token}", "User-Agent": USER_AGENT}
-    url = f"https://oauth.reddit.com{endpoint}"
+    Args:
+        posts_data: A list of dictionaries, where each dictionary represents a post
+                    and contains at least 'title', 'score', 'subreddit', 'permalink', 'url'.
+        spreadsheet_name: The name of the Google Sheet to export to.
 
-    attempt = 0
-    while attempt < 5:
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-        except requests.exceptions.RequestException as e:
-            console.print(f"❌ [bold red]Network error: {e}[/bold red]")
-            attempt += 1
-            if attempt < 5:
-                exponential_backoff(attempt)
-                continue
-            return None
-
-        if response.status_code == 401:
-            console.print("🔄 [yellow]Access token expired, refreshing...[/yellow]")
-            new_access_token = refresh_access_token_safe()
-            if not new_access_token:
-                console.print("❌ [bold red]Refresh token failed, manual re-authentication needed.[/bold red]")
-                return None
-            headers["Authorization"] = f"Bearer {new_access_token}"
-            
-            # Retry the request with new token
-            try:
-                response = requests.get(url, headers=headers, timeout=30)
-            except requests.exceptions.RequestException as e:
-                console.print(f"❌ [bold red]Network error on retry: {e}[/bold red]")
-                return None
-
-        if response.status_code == 200:
-            try:
-                return response.json()
-            except json.JSONDecodeError:
-                console.print(f"❌ [bold red]Invalid JSON response from Reddit API[/bold red]")
-                return None
-
-        elif response.status_code == 429:
-            console.print("⚠️ [bold yellow]Rate limited. Retrying with backoff...[/bold yellow]")
-            attempt += 1
-            exponential_backoff(attempt)
-
-        elif response.status_code == 403:
-            console.print("❌ [bold red]Access forbidden. Check your Reddit app permissions and scopes.[/bold red]")
-            return None
-
-        elif response.status_code == 404:
-            console.print("❌ [bold red]Reddit API endpoint not found. Check username and endpoint.[/bold red]")
-            return None
-
-        else:
-            console.print(f"❌ [bold red]Error {response.status_code}: {response.reason}[/bold red]")
-            console.print(f"❌ [bold red]Response: {response.text}[/bold red]")
-            attempt += 1
-            if attempt < 5:
-                exponential_backoff(attempt)
-
-    console.print("❌ [bold red]Max retry attempts reached.[/bold red]")
-    return None
-
-def export_to_google_sheet(posts_list, spreadsheet_name="Reddit Saved Posts", worksheet_name="Saved Posts"):
-    """Exports a list of Reddit posts to a Google Sheet."""
-    if not GOOGLE_SERVICE_ACCOUNT_KEY_PATH:
-        console.print("❌ [bold red]GOOGLE_SERVICE_ACCOUNT_KEY_PATH is not set in .env. Cannot export to Google Sheet.[/bold red]")
-        return False
-
+    Returns:
+        True if the export was successful, False otherwise.
+    """
     try:
-        # Authenticate with Google Sheets
-        creds = service_account.Credentials.from_service_account_file(
-            GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
-        gc = gspread.authorize(creds)
+        # Authenticate with Google Sheets using service account credentials
+        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if not credentials_path or not os.path.exists(credentials_path):
+            console.print(
+                "[bold red]Erreur:[/bold red] Le chemin vers le fichier de credentials Google n'est pas défini "
+                "ou le fichier n'existe pas. Vérifiez GOOGLE_APPLICATION_CREDENTIALS dans votre .env",
+                style="bold red"
+            )
+            return False
 
-        # Open the spreadsheet
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = service_account.Credentials.from_service_account_file(credentials_path, scopes=scope)
+        client = gspread.authorize(creds)
+
+        # Open the spreadsheet by name
         try:
-            spreadsheet = gc.open(spreadsheet_name)
-        except gspread.exceptions.SpreadsheetNotFound:
-            console.print(f"⚠️ [yellow]Spreadsheet '{spreadsheet_name}' not found. Creating a new one.[/yellow]")
-            spreadsheet = gc.create(spreadsheet_name)
-            # Share the newly created spreadsheet with the service account email
-            # This is crucial if the spreadsheet was just created by the script
-            spreadsheet.share(creds.client_email, perm_type='user', role='writer')
-            console.print(f"✅ [green]Spreadsheet '{spreadsheet_name}' created and shared with service account.[/green]")
-            time.sleep(5) # Add a small delay for permissions to propagate
+            spreadsheet = client.open(spreadsheet_name)
+            console.print(f"[bold green]Succès:[/bold green] Feuille de calcul '{spreadsheet_name}' ouverte.")
+        except gspread.SpreadsheetNotFound:
+            console.print(
+                f"[bold red]Erreur:[/bold red] La feuille de calcul '{spreadsheet_name}' n'a pas été trouvée. "
+                "Veuillez la créer et la partager avec l'adresse e-mail de votre compte de service.",
+                style="bold red"
+            )
+            return False
+        except gspread.exceptions.APIError as e:
+            if "The caller does not have permission" in str(e):
+                console.print(
+                    f"[bold red]Erreur de permission:[/bold red] Le compte de service n'a pas les permissions "
+                    f"nécessaires pour accéder à la feuille '{spreadsheet_name}'. "
+                    f"Assurez-vous de l'avoir partagée avec le compte de service en tant qu'éditeur.",
+                    style="bold red"
+                )
+            else:
+                console.print(f"[bold red]Erreur API Google Sheets:[/bold red] {e}", style="bold red")
+            return False
 
-        # Select the worksheet
-        try:
-            worksheet = spreadsheet.worksheet(worksheet_name)
-        except gspread.exceptions.WorksheetNotFound:
-            console.print(f"⚠️ [yellow]Worksheet '{worksheet_name}' not found. Creating a new one.[/yellow]")
-            worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows="100", cols="20")
-            console.print(f"✅ [green]Worksheet '{worksheet_name}' created.[/green]")
+        # Select the first worksheet
+        worksheet = spreadsheet.get_worksheet(0)
+        console.print("[bold green]Succès:[/bold green] Première feuille de travail sélectionnée.")
 
-        # Prepare data for Google Sheet
-        headers = [
-            "Title", "URL", "Subreddit", "Author", "Score", "Type",
-            "Created UTC", "Selftext", "Comments"
-        ]
-        data_rows = []
-        for post in posts_list:
-            comments_str = ""
-            if post.get("comments"):
-                comments_list = []
-                for comment in post["comments"]:
-                    comments_list.append(f"u/{comment.get('author', '[deleted]')}: {comment.get('body', '')} (Score: {comment.get('score', 0)})")
-                comments_str = "\n\n".join(comments_list) # Use \n\n for new lines in Google Sheets
-
-            data_rows.append([
-                post.get("title", ""),
-                post.get("url", ""),
-                post.get("subreddit", ""),
-                post.get("author", ""),
-                post.get("score", 0),
-                post.get("type", ""),
-                post.get("created_utc", 0),
-                post.get("selftext", ""),
-                comments_str
-            ])
-
-        # Clear existing content and write new data
+        # Clear existing content
         worksheet.clear()
-        worksheet.append_row(headers)
-        worksheet.append_rows(data_rows)
+        console.print("[bold green]Succès:[/bold green] Contenu existant de la feuille effacé.")
 
-        console.print(f"✅ [bold green]Successfully exported {len(posts_list)} posts to Google Sheet '{spreadsheet_name}' (Worksheet: '{worksheet_name}').[/bold green]")
+        # Define headers
+        headers = ['Title', 'Score', 'Subreddit', 'Reddit Link', 'External URL', 'Date Saved', 'Self Text', 'Comments Count']
+        worksheet.append_row(headers)
+        console.print("[bold green]Succès:[/bold green] En-têtes ajoutés.")
+
+        # Apply formatting to headers (bold)
+        worksheet.format('1:1', {'textFormat': {'bold': True}})
+
+        # Apply formatting to all cells (wrap text, top vertical alignment)
+        # This applies to all cells from row 2 onwards (data rows)
+        worksheet.format('A:H', {
+            'wrapStrategy': 'WRAP',
+            'verticalAlignment': 'TOP'
+        })
+
+        # Prepare data for insertion and notes
+        rows_to_insert = []
+        cells_to_update = [] # To store gspread.Cell objects for batch update
+        selftext_col_index = headers.index('Self Text') + 1 # gspread uses 1-based indexing for columns
+
+        for i, post in enumerate(posts_data):
+            date_saved = post.get('date_saved', '')
+            if isinstance(date_saved, (int, float)): # Assuming timestamp
+                date_saved = datetime.fromtimestamp(date_saved).strftime('%Y-%m-%d %H:%M:%S')
+            
+            full_selftext = str(post.get('selftext', '')) # Ensure it's a string
+            truncated_selftext = full_selftext
+            if full_selftext:
+                words = full_selftext.split()
+                if len(words) > 20:
+                    truncated_selftext = ' '.join(words[:20]) + '...'
+            
+            row = [
+                post.get('title', ''),
+                post.get('score', ''),
+                post.get('subreddit', ''),
+                post.get('permalink', ''),
+                post.get('url', ''),
+                date_saved,
+                truncated_selftext,
+                post.get('num_comments', '')
+            ]
+            rows_to_insert.append(row)
+
+            # Store full text for notes, if selftext is not empty
+            if full_selftext:
+                # Row index for notes starts from 2 (after header), plus current row index (i)
+                cell = gspread.Cell(row=i + 2, col=selftext_col_index, value=truncated_selftext)
+                cell.note = full_selftext
+                cells_to_update.append(cell)
+
+        # Insert all data in one batch
+        if rows_to_insert:
+            worksheet.append_rows(rows_to_insert)
+            console.print(f"[bold green]Succès:[/bold green] {len(rows_to_insert)} lignes de données insérées.")
+        else:
+            console.print("[bold yellow]Avertissement:[/bold yellow] Aucune donnée à insérer.")
+
+        # Update cells with notes in a batch
+        if cells_to_update:
+            worksheet.update_cells(cells_to_update)
+            console.print(f"[bold green]Succès:[/bold green] {len(cells_to_update)} notes ajoutées aux cellules de texte.")
+
         return True
 
     except Exception as e:
-        console.print(f"❌ [bold red]Error exporting to Google Sheet: {e}[/bold red]")
+        console.print(f"[bold red]Une erreur inattendue est survenue:[/bold red] {e}", style="bold red")
         return False
 
-def fetch_comments_for_post(post_id):
+def fetch_saved_posts(format: str = "json", force_fetch: bool = False) -> dict:
+    """
+    Fetches saved posts from Reddit and saves them in the specified format.
 
-    """Fetch top-level comments for a given post ID."""
-    console.print(f"    _ 💬 [dim]Fetching comments for post {post_id}...[/dim]")
-    endpoint = f"/comments/{post_id.split('_')[1]}?limit=100"  # Use post ID for comments
-    comments_data = make_request(endpoint)
-    
-    comments = []
-    if comments_data and isinstance(comments_data, list) and len(comments_data) > 1:
-        for comment in comments_data[1]["data"]["children"]:
-            if "data" not in comment or "body" not in comment["data"]:
-                continue # Skip non-comment entries
-            
-            comment_data = comment["data"]
-            comments.append({
-                "author": comment_data.get("author", "[deleted]"),
-                "body": comment_data.get("body", ""),
-                "score": comment_data.get("score", 0)
-            })
-    time.sleep(0.5) # Be nice to the API
-    return comments
-
-def fetch_saved_posts(format="json", force_fetch=False):
-    """Fetch saved Reddit posts, using `after` for full fetch and `before` for incremental fetch.
-    
     Args:
-        format (str): Output format - "json" or "html"
-        force_fetch (bool): If True, fetch all posts from scratch
-    
+        format: The desired output format ('json', 'html', 'google_sheet').
+        force_fetch: If True, forces a new fetch regardless of existing data.
+
     Returns:
-        dict: A dictionary containing:
-            - content: The actual posts (list for JSON, string for HTML)
-            - count: Number of posts fetched
-            - format: The format used ("json" or "html")
+        A dictionary containing the fetched content, count, and format.
     """
+    console.print(f"[bold blue]Fetching saved posts from Reddit...[/bold blue]")
     
-    last_fetch_timestamp = None
-    last_fetch_before = None
-    fetch_mode = "before"  # Default fetch mode for incremental updates
-    cursor_param = None  # Holds `after` or `before` value
+    client_id = os.getenv("CLIENT_ID")
+    client_secret = os.getenv("CLIENT_SECRET")
+    user_agent = os.getenv("USER_AGENT")
+    reddit_username = os.getenv("REDDIT_USERNAME")
 
-    # Read last_fetch.json if it exists
-    if os.path.exists(LAST_FETCH_FILE) and not force_fetch:
-        try:
-            with open(LAST_FETCH_FILE, "r", encoding="utf-8") as file:
-                last_fetch_data = json.load(file)
-                last_fetch_timestamp = last_fetch_data.get("last_fetch")
-                last_fetch_before = last_fetch_data.get("before")
-                cursor_param = last_fetch_before  # Start from the last known post
-                console.print(f"📋 [bold blue]Incremental fetch from timestamp: {last_fetch_timestamp}[/bold blue]")
-                console.print(f"📋 [bold blue]Starting from post ID: {last_fetch_before}[/bold blue]")
-        except (json.JSONDecodeError, FileNotFoundError) as e:
-            console.print(f"⚠️ [bold yellow]Could not read last_fetch.json: {e}. Starting fresh fetch.[/bold yellow]")
+    if not all([client_id, client_secret, user_agent, reddit_username]):
+        console.print("[bold red]Erreur:[/bold red] Les variables d'environnement CLIENT_ID, CLIENT_SECRET, USER_AGENT, REDDIT_USERNAME doivent être définies dans .env pour l'authentification Reddit.", style="bold red")
+        return {"content": [], "count": 0, "format": format}
 
-    # Use `after` for force fetch (fetch ALL saved posts)
-    if force_fetch or not os.path.exists(LAST_FETCH_FILE):
-        fetch_mode = "after"
-        cursor_param = None  # Reset to fetch all data from the start
-        console.print("🚀 [bold cyan]Force Fetch Activated: Fetching ALL saved posts using pagination.[/bold cyan]")
+    # Ensure we have a valid refresh token
+    tokens = load_tokens_safe()
+    if not tokens or "refresh_token" not in tokens:
+        console.print("[bold red]Erreur:[/bold red] Jeton de rafraîchissement Reddit introuvable. Veuillez vous authentifier.", style="bold red")
+        if is_headless():
+            show_headless_instructions()
+        return {"content": [], "count": 0, "format": format}
 
-    new_posts = []
-    page_count = 0
-    total_processed = 0
-    
-    # Load existing posts to check for duplicates in incremental mode
-    existing_post_ids = set()
-    if not force_fetch and os.path.exists(OUTPUT_JSON):
-        try:
-            with open(OUTPUT_JSON, "r", encoding="utf-8") as file:
-                existing_posts = json.load(file)
-                existing_post_ids = {post["fullname"] for post in existing_posts}
-                console.print(f"📋 [blue]Loaded {len(existing_post_ids)} existing post IDs for duplicate checking[/blue]")
-        except (json.JSONDecodeError, FileNotFoundError) as e:
-            console.print(f"⚠️ [yellow]Could not load existing posts for duplicate checking: {e}[/yellow]")
-    
-    while True:
-        endpoint = f"/user/{REDDIT_USERNAME}/saved?limit=100"
-        if cursor_param:
-            endpoint += f"&{fetch_mode}={cursor_param}"  # Dynamically switch between `after` and `before`
+    refresh_token = tokens["refresh_token"]
 
-        page_count += 1
-        console.print(f"📡 [dim]Fetching page {page_count}...[/dim]")
-        saved_posts = make_request(endpoint)
+    try:
+        reddit = praw.Reddit(
+            client_id=client_id,
+            client_secret=client_secret,
+            user_agent=user_agent,
+            username=reddit_username,
+            refresh_token=refresh_token
+        )
         
-        if not saved_posts or "data" not in saved_posts:
-            console.print(f"⚠️ [yellow]No data received from Reddit API on page {page_count}[/yellow]")
-            break
-
-        posts = saved_posts["data"].get("children", [])
-        if not posts:
-            console.print(f"✅ [green]No more posts available. Fetched {page_count - 1} pages total.[/green]")
-            break  # No more posts available
-
-        total_processed += len(posts)
-        console.print(f"📄 [blue]Processing {len(posts)} posts from page {page_count}[/blue]")
-
-        posts_found_this_page = 0
-        duplicate_count = 0
-        
-        for post in posts:
-            data = post["data"]
-            post_id = data["name"]
-            
-            # For incremental fetch, stop if we've seen this post before
-            if not force_fetch and post_id in existing_post_ids:
-                duplicate_count += 1
-                console.print(f"🔄 [dim]Found existing post: {post_id} - stopping incremental fetch[/dim]")
-                # Don't break immediately, process any new posts in this batch first
-                continue
-            
-            # Handle both posts and comments
-            post_type = "post" if data.get("title") else "comment"
-            
-            if post_type == "post":
-                post_data = {
-                    "title": data.get("title", "No Title"),
-                    "url": data.get("url", f"https://reddit.com{data.get('permalink', '#')}"),
-                    "subreddit": data.get("subreddit"),
-                    "created_utc": data.get("created_utc"),
-                    "fullname": data["name"],
-                    "type": "post",
-                    "author": data.get("author", "[deleted]"),
-                    "score": data.get("score", 0),
-                    "selftext": data.get("selftext", ""),
-                    "comments": fetch_comments_for_post(data["name"])
-                }
-                new_posts.append(post_data)
-            else:
-                # Handle saved comments
-                new_posts.append({
-                    "title": f"Comment in: {data.get('link_title', 'Unknown Post')}",
-                    "url": f"https://reddit.com{data.get('permalink', '#')}",
-                    "subreddit": data.get("subreddit"),
-                    "created_utc": data.get("created_utc"),
-                    "fullname": data["name"],
-                    "type": "comment",
-                    "author": data.get("author", "[deleted]"),
-                    "score": data.get("score", 0),
-                    "body": data.get("body", "")
+        posts_data = []
+        for item in reddit.user.me().saved(limit=None):
+            if isinstance(item, praw.models.Submission):
+                posts_data.append({
+                    'title': item.title,
+                    'score': item.score,
+                    'subreddit': item.subreddit.display_name,
+                    'permalink': f"https://www.reddit.com{item.permalink}",
+                    'url': item.url,
+                    'date_saved': item.created_utc, # Unix timestamp
+                    'selftext': item.selftext,
+                    'num_comments': item.num_comments
                 })
+            elif isinstance(item, praw.models.Comment):
+                # Handle saved comments as well, if desired
+                posts_data.append({
+                    'title': f"Comment on {item.submission.title}",
+                    'score': item.score,
+                    'subreddit': item.subreddit.display_name,
+                    'permalink': f"https://www.reddit.com{item.permalink}",
+                    'url': item.submission.url, # Link to the submission the comment is on
+                    'date_saved': item.created_utc,
+                    'selftext': item.body, # Comment body is selftext for comments
+                    'num_comments': 'N/A' # Not applicable for a single comment
+                })
+        console.print(f"[bold green]Fetched {len(posts_data)} saved posts and comments from Reddit.[/bold green]")
+
+        # Save to JSON for subsequent runs if not exporting to Google Sheet directly
+        if format != "google_sheet":
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+                json.dump(posts_data, f, indent=4)
+            console.print(f"[bold green]Saved {len(posts_data)} posts to {OUTPUT_JSON}.[/bold green]")
+
+        if format == "google_sheet":
+            spreadsheet_name = os.getenv("GOOGLE_SHEET_NAME")
+            if not spreadsheet_name:
+                console.print("[bold red]Erreur:[/bold red] GOOGLE_SHEET_NAME n'est pas défini dans .env. Impossible d'exporter vers Google Sheet.", style="bold red")
+                return {"content": [], "count": 0, "format": format}
             
-            posts_found_this_page += 1
-
-        console.print(f"🆕 [green]Found {posts_found_this_page} new posts on this page[/green]")
-        if duplicate_count > 0:
-            console.print(f"🔄 [yellow]Found {duplicate_count} duplicate posts - stopping incremental fetch[/yellow]")
-            
-        # For incremental fetch, stop if we found duplicates (we've caught up)
-        if not force_fetch and duplicate_count > 0:
-            console.print(f"✅ [green]Incremental fetch complete. Processed {page_count} pages, found {len(new_posts)} new posts.[/green]")
-            break
-
-        # Move pagination cursor
-        if fetch_mode == "after":
-            cursor_param = posts[-1]["data"]["name"]  # Take LAST post for force fetch
-        else:
-            cursor_param = posts[0]["data"]["name"]  # Take FIRST post for incremental
-
-        # Add a small delay to be nice to Reddit's servers
-        time.sleep(0.5)
-
-    console.print(f"📊 [bold blue]Total: Processed {total_processed} posts across {page_count} pages, found {len(new_posts)} new posts[/bold blue]")
-
-    # **Store last fetched post details**
-    if new_posts:
-        last_fetched_value = new_posts[-1]["created_utc"] if fetch_mode == "after" else new_posts[0]["created_utc"]
-        last_fetched_after = new_posts[-1]["fullname"] if fetch_mode == "after" else None
-        last_fetched_before = new_posts[0]["fullname"] if fetch_mode == "before" else None
-
-        try:
-            # Add human-readable timestamp
-            from datetime import datetime
-            human_readable_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            with open(LAST_FETCH_FILE, "w", encoding="utf-8") as file:
-                json.dump({
-                    "last_fetch": last_fetched_value,
-                    "after": last_fetched_after,
-                    "before": last_fetched_before,
-                    "timestamp": time.time(),
-                    "last_fetch_human": human_readable_time,
-                    "total_fetched": len(new_posts)
-                }, file, indent=2)
-
-            console.print(f"📌 Last fetch timestamp updated: {last_fetched_value}", style="bold cyan")
-            console.print(f"📌 Human-readable time: {human_readable_time}", style="bold cyan")
-            console.print(f"📌 Last fetch `after` updated: {last_fetched_after if last_fetched_after else 'N/A'}", style="bold cyan")
-            console.print(f"📌 Last fetch `before` updated: {last_fetched_before if last_fetched_before else 'N/A'}", style="bold cyan")
-        except Exception as e:
-            console.print(f"⚠️ [yellow]Could not save last fetch data: {e}[/yellow]")
-
-        # Load existing posts and merge
-        existing_posts = []
-        if os.path.exists(OUTPUT_JSON) and not force_fetch:
-            try:
-                with open(OUTPUT_JSON, "r", encoding="utf-8") as file:
-                    existing_posts = json.load(file)
-                console.print(f"📋 [blue]Loaded {len(existing_posts)} existing posts from storage[/blue]")
-            except (json.JSONDecodeError, FileNotFoundError) as e:
-                console.print(f"⚠️ [yellow]Could not load existing posts: {e}. Starting fresh.[/yellow]")
-        
-        # Combine and deduplicate posts
-        combined_posts = new_posts + existing_posts  # Prepend new posts instead of appending
-        unique_posts = {post["fullname"]: post for post in combined_posts}.values()  # Remove duplicates
-        unique_posts_list = list(unique_posts)
-        
-        console.print(f"🔄 [green]Combined {len(new_posts)} new + {len(existing_posts)} existing = {len(unique_posts_list)} unique posts[/green]")
-
-        # Always save JSON version for data integrity
-        try:
-            with open(OUTPUT_JSON, "w", encoding="utf-8") as file:
-                json.dump(unique_posts_list, file, indent=2, ensure_ascii=False)
-            console.print(f"💾 [green]Saved {len(unique_posts_list)} posts to {OUTPUT_JSON}[/green]")
-        except Exception as e:
-            console.print(f"❌ [red]Could not save JSON file: {e}[/red]")
-        
-        # Return based on requested format
-        if format == "html":
-            html_output = generate_html_output(unique_posts_list)
-            return {
-                "content": html_output,
-                "count": len(new_posts),  # Return count of NEW posts, not total
-                "format": "html"
-            }
-        elif format == "google_sheet":
-            if GOOGLE_SHEET_NAME:
-                success = export_to_google_sheet(unique_posts_list, spreadsheet_name=GOOGLE_SHEET_NAME)
-                return {
-                    "content": "Export to Google Sheet " + ("successful" if success else "failed"),
-                    "count": len(new_posts),
-                    "format": "google_sheet"
-                }
+            success = export_to_google_sheet(posts_data, spreadsheet_name)
+            if success:
+                console.print("[bold green]Exportation vers Google Sheet terminée avec succès![/bold green]")
+                return {"content": posts_data, "count": len(posts_data), "format": format}
             else:
-                console.print("❌ [bold red]GOOGLE_SHEET_NAME is not set in .env. Cannot export to Google Sheet.[/bold red]")
-                return {
-                    "content": "GOOGLE_SHEET_NAME not set",
-                    "count": 0,
-                    "format": "google_sheet"
-                }
-        else:  # JSON format
-            return {
-                "content": unique_posts_list,
-                "count": len(new_posts),  # Return count of NEW posts, not total
-                "format": "json"
-            }
-   
-    console.print("ℹ️ [bold blue]No new posts found.[/bold blue]")
-    
-    # Return consistent structure even when no posts found
-    if format == "html":
-        return {
-            "content": "<html><head><title>Saved Reddit Posts</title></head><body><p>No posts found.</p></body></html>",
-            "count": 0,
-            "format": "html"
-        }
-    elif format == "google_sheet":
-        return {
-            "content": "No new posts found to export to Google Sheet.",
-            "count": 0,
-            "format": "google_sheet"
-        }
-    else:
-        return {
-            "content": [],
-            "count": 0,
-            "format": "json"
-        }
-
-def generate_html_output(posts_list):
-    """Generate HTML output from posts list."""
-    html_parts = []
-    
-    # HTML header
-    html_parts.append('''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Saved Reddit Posts</title>
-    <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            background-color: #f5f5f5; 
-            line-height: 1.6;
-        }
-        .container { 
-            max-width: 1200px; 
-            margin: 0 auto; 
-            background: white; 
-            padding: 20px; 
-            border-radius: 8px; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-        }
-        h1 { 
-            color: #ff4500; 
-            text-align: center; 
-            border-bottom: 2px solid #ff4500; 
-            padding-bottom: 10px; 
-            margin-bottom: 20px;
-        }
-        .post { 
-            margin: 15px 0; 
-            padding: 15px; 
-            border: 1px solid #ddd; 
-            border-radius: 5px; 
-            background: #fafafa; 
-        }
-        .post-title { 
-            font-weight: bold; 
-            color: #333; 
-            text-decoration: none; 
-            font-size: 16px; 
-            display: inline-block;
-            margin-bottom: 5px;
-        }
-        .post-title:hover { 
-            color: #ff4500; 
-            text-decoration: underline; 
-        }
-        .post-meta { 
-            color: #666; 
-            font-size: 12px; 
-            margin-top: 5px; 
-        }
-        .subreddit { 
-            color: #ff4500; 
-            font-weight: bold; 
-        }
-        .comment-body { 
-            margin-top: 8px; 
-            padding: 8px; 
-            background: #fff; 
-            border-left: 3px solid #ff4500; 
-            font-style: italic; 
-            border-radius: 3px;
-        }
-        .stats { 
-            text-align: center; 
-            margin: 20px 0; 
-            padding: 15px; 
-            background: #e3f2fd; 
-            border-radius: 5px; 
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Saved Reddit Posts</h1>
-        <div class="stats">
-            Total Saved Items: ''' + str(len(posts_list)) + '''
-        </div>''')
-
-    for index, post in enumerate(posts_list, start=1):
-        post_type = post.get("type", "post")
-        author = post.get("author", "[deleted]")
-        score = post.get("score", 0)
-        subreddit = post.get("subreddit", "unknown")
+                console.print("[bold red]Échec de l'exportation vers Google Sheet.[/bold red]")
+                return {"content": [], "count": 0, "format": format}
         
-        # Convert timestamp to readable date
-        created_utc = post.get("created_utc", 0)
-        if created_utc:
-            try:
-                from datetime import datetime
-                date_str = datetime.fromtimestamp(created_utc).strftime("%Y-%m-%d %H:%M")
-            except (ValueError, OSError):
-                date_str = "Unknown date"
-        else:
-            date_str = "Unknown date"
-        
-        # Escape HTML characters in title and other content
-        title = post.get('title', 'No Title').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
-        url = post.get('url', '#').replace('"', '&quot;')
-        
-        html_parts.append(f'''
-        <div class="post">
-            <div>
-                <strong>{index}.</strong>
-                <a href="{url}" target="_blank" class="post-title">{title}</a>
-            </div>
-            <div class="post-meta">
-                r/{subreddit} • u/{author} • {score} points • {date_str} • {post_type}
-            </div>''')
-        
-        # Add comment body if it's a comment
-        if post_type == "comment" and post.get("body"):
-            comment_body = post.get("body", "").replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            html_parts.append(f'            <div class="comment-body">{comment_body}</div>')
-        
-        html_parts.append('        </div>')
+        return {"content": posts_data, "count": len(posts_data), "format": format}
 
-    # Add footer
-    current_time = time.strftime("%Y-%m-%d %H:%M:%S")
-    html_parts.append(f'''
-        <div class="stats">
-            Generated on: {current_time}
-        </div>
-    </div>
-</body>
-</html>''')
-
-    return '\n'.join(html_parts)
-
-def fetch_saved_posts_legacy(format="json", force_fetch=False):
-    """Legacy function that returns just the content for backward compatibility.
-    
-    Returns:
-        list or str: Posts data (list for JSON, HTML string for HTML)
-    """
-    result = fetch_saved_posts(format, force_fetch)
-    return result["content"] if result else ([] if format == "json" else "")
+    except Exception as e:
+        console.print(f"[bold red]Une erreur est survenue lors de la récupération des posts Reddit:[/bold red] {e}", style="bold red")
+        return {"content": [], "count": 0, "format": format}
