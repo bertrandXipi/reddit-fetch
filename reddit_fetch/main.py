@@ -81,11 +81,16 @@ def cli_entry():
     # Show environment information
     is_docker_env = is_docker()
     is_headless_env = is_headless()
-    is_non_interactive = not is_interactive()
     
+    # Determine if running in non-interactive mode based on environment variables
+    # This is more robust for automated runs than checking TTY directly.
+    env_output_format = os.getenv("OUTPUT_FORMAT")
+    env_force_fetch = os.getenv("FORCE_FETCH")
+    is_non_interactive_env = env_output_format is not None or env_force_fetch is not None
+
     console.print(f"🐳 Docker Environment: {'Yes' if is_docker_env else 'No'}", style="bold blue")
     console.print(f"🖥️  Headless System: {'Yes' if is_headless_env else 'No'}", style="bold blue")
-    console.print(f"💬 Interactive Session: {'Yes' if not is_non_interactive else 'No'}", style="bold magenta")
+    console.print(f"💬 Interactive Session: {'No' if is_non_interactive_env else 'Yes'}", style="bold magenta")
     
     # Check authentication before proceeding (only if not export-only)
     if not args.export_only:
@@ -126,10 +131,10 @@ def cli_entry():
             sys.exit(1)
 
     # Configure execution based on environment
-    if is_docker_env or is_non_interactive:
+    if is_docker_env or is_non_interactive_env:
         # Non-interactive mode - use environment variables
-        format_choice = os.getenv("OUTPUT_FORMAT", "json")
-        force_fetch = os.getenv("FORCE_FETCH", "false").lower() == "true"
+        format_choice = env_output_format if env_output_format else "json"
+        force_fetch = env_force_fetch.lower() == "true" if env_force_fetch else False
         
         console.print(f"🔧 [bold blue]Non-interactive mode detected[/bold blue]")
         console.print(f"📄 Output format: [bold]{format_choice}[/bold]")
@@ -224,7 +229,7 @@ def cli_entry():
         else:
             # This is likely a code/data structure error
             console.print(f"\n❌ [bold red]Data processing error: {e}[/bold red]")
-            console.print("🔧 [yellow]This may be a bug. Please check the error details above.[/blue]")
+            console.print("🔧 [blue]This may be a bug. Please check the error details above.[/blue]")
             console.print("💡 [blue]You can try using --force-fetch to start fresh.[/blue]")
         sys.exit(1)
     except Exception as e:
