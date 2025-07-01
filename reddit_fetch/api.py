@@ -5,7 +5,7 @@ from rich.console import Console
 from dotenv import load_dotenv
 import json
 import requests
-from datetime import datetime
+from datetime import datetime # Changed to direct import of datetime class
 import praw
 from reddit_fetch.auth import refresh_access_token_safe, load_tokens_safe, is_headless, show_headless_instructions # Import authentication functions
 
@@ -16,6 +16,26 @@ console = Console()
 
 DATA_DIR = "data/"
 OUTPUT_JSON = f"{DATA_DIR}saved_posts.json"
+LAST_FETCH_FILE = f"{DATA_DIR}last_fetch.json"
+
+def _get_last_fetch_timestamp():
+    """Reads the last fetch timestamp from a file."""
+    if os.path.exists(LAST_FETCH_FILE):
+        try:
+            with open(LAST_FETCH_FILE, "r") as f:
+                return float(f.read().strip())
+        except (IOError, ValueError):
+            console.print("[bold yellow]Avertissement:[/bold yellow] Impossible de lire le timestamp du dernier fetch. Reprise à zéro.")
+    return 0.0 # Return 0.0 if file doesn't exist or is corrupted
+
+def _save_last_fetch_timestamp(timestamp):
+    """Saves the last fetch timestamp to a file."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        with open(LAST_FETCH_FILE, "w") as f:
+            f.write(str(timestamp))
+    except IOError as e:
+        console.print(f"[bold red]Erreur:[/bold red] Impossible de sauvegarder le timestamp du dernier fetch: {e}", style="bold red")
 
 def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> bool:
     """
@@ -76,7 +96,7 @@ def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> boo
         console.print("[bold green]Succès:[/bold green] Contenu existant de la feuille effacé.")
 
         # Define headers
-        headers = ['Title', 'Score', 'Subreddit', 'Reddit Link', 'External URL', 'Date Saved', 'Self Text', 'Comments Count']
+        headers = ['Title', 'Score', 'Subreddit', 'Reddit Link', 'External URL', 'Date Saved', 'Self Text', 'Comments Count', 'Combined Content']
         worksheet.append_row(headers)
         console.print("[bold green]Succès:[/bold green] En-têtes ajoutés.")
 
@@ -85,7 +105,7 @@ def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> boo
 
         # Apply formatting to all cells (wrap text, top vertical alignment)
         # This applies to all cells from row 2 onwards (data rows)
-        worksheet.format('A:H', {
+        worksheet.format('A:I', {
             'wrapStrategy': 'WRAP',
             'verticalAlignment': 'TOP'
         })
@@ -96,9 +116,15 @@ def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> boo
         for i, post in enumerate(posts_data):
             date_saved = post.get('date_saved', '')
             if isinstance(date_saved, (int, float)): # Assuming timestamp
-                date_saved = datetime.fromtimestamp(date_saved).strftime('%Y-%m-%d %H:%M:%S')
+                date_saved = datetime.fromtimestamp(date_saved).strftime('%Y-%m-%d %H:%M:%S') # Changed here
             
-            full_selftext = str(post.get('selftext', '')) # Ensure it's a string
+            full_selftext = str(post.get('selftext', ''))
+            if len(full_selftext) > 4999:
+                full_selftext = full_selftext[:4999]
+
+            combined_content = str(post.get('combined_content', ''))
+            if len(combined_content) > 4999:
+                combined_content = combined_content[:4999]
             
             row = [
                 post.get('title', ''),
@@ -107,8 +133,9 @@ def export_to_google_sheet(posts_data: list[dict], spreadsheet_name: str) -> boo
                 post.get('permalink', ''),
                 post.get('url', ''),
                 date_saved,
-                full_selftext, # Display full text directly
-                post.get('num_comments', '')
+                full_selftext,
+                post.get('num_comments', ''),
+                combined_content
             ]
             rows_to_insert.append(row)
 
@@ -166,10 +193,38 @@ def fetch_saved_posts(format: str = "json", force_fetch: bool = False) -> dict:
             refresh_token=refresh_token
         )
         
-        posts_data = []
-        for item in reddit.user.me().saved(limit=None):
+        new_posts_data = []
+        last_fetch_timestamp = _get_last_fetch_timestamp()
+        current_max_timestamp = last_fetch_timestamp
+
+        # Fetch saved items, starting from the last fetched timestamp if not force_fetch
+        # PRAW's .saved() method does not directly support an 'after' parameter for timestamp.
+        # We need to fetch and then filter manually.
+        # For efficiency, we can limit the fetch to a reasonable number and then filter.
+        # Or, if we want truly incremental, we need to iterate until we hit old posts.
+        # For simplicity and to avoid infinite loops on first run, we'll fetch a batch and filter.
+        # A more robust solution for very large saved lists might involve more complex pagination.
+        
+        # Fetch a reasonable number of recent saved items
+        # Reddit API's saved() generator yields items from newest to oldest.
+        for item in reddit.user.me().saved(limit=100): # Fetch up to 100 most recent saved items
+            if item.created_utc <= last_fetch_timestamp and not force_fetch:
+                console.print(f"[bold blue]Stopping fetch: Reached item saved at {datetime.fromtimestamp(item.created_utc).strftime('%Y-%m-%d %H:%M:%S')}, which is older than or equal to last fetch timestamp.[/bold blue]")
+                break # Stop if we encounter an item older than or equal to the last fetch timestamp
+
+            combined_content = ""
             if isinstance(item, praw.models.Submission):
-                posts_data.append({
+                combined_content += item.selftext if item.selftext else ""
+                # Fetch all comments for the submission
+                # Be cautious: this can be very slow and hit API limits for many posts with many comments
+                try:
+                    item.comments.replace_more(limit=None)
+                    for comment in item.comments.list():
+                        combined_content += f"\n\n--- Comment by u/{comment.author.name if comment.author else '[deleted]'} ---\n{comment.body}"
+                except Exception as comment_e:
+                    console.print(f"[bold yellow]Avertissement:[/bold yellow] Impossible de récupérer les commentaires pour {item.title}: {comment_e}", style="bold yellow")
+
+                new_posts_data.append({
                     'title': item.title,
                     'score': item.score,
                     'subreddit': item.subreddit.display_name,
@@ -177,11 +232,12 @@ def fetch_saved_posts(format: str = "json", force_fetch: bool = False) -> dict:
                     'url': item.url,
                     'date_saved': item.created_utc, # Unix timestamp
                     'selftext': item.selftext,
-                    'num_comments': item.num_comments
+                    'num_comments': item.num_comments,
+                    'combined_content': combined_content
                 })
             elif isinstance(item, praw.models.Comment):
-                # Handle saved comments as well, if desired
-                posts_data.append({
+                combined_content += item.body # Comment body is the primary content for comments
+                new_posts_data.append({
                     'title': f"Comment on {item.submission.title}",
                     'score': item.score,
                     'subreddit': item.subreddit.display_name,
@@ -189,15 +245,41 @@ def fetch_saved_posts(format: str = "json", force_fetch: bool = False) -> dict:
                     'url': item.submission.url, # Link to the submission the comment is on
                     'date_saved': item.created_utc,
                     'selftext': item.body, # Comment body is selftext for comments
-                    'num_comments': 'N/A' # Not applicable for a single comment
+                    'num_comments': 'N/A', # Not applicable for a single comment
+                    'combined_content': combined_content
                 })
-        console.print(f"[bold green]Fetched {len(posts_data)} saved posts and comments from Reddit.[/bold green]")
+            
+            # Update current_max_timestamp with the newest item's timestamp
+            if item.created_utc > current_max_timestamp:
+                current_max_timestamp = item.created_utc
+
+        console.print(f"[bold green]Fetched {len(new_posts_data)} new saved posts and comments from Reddit.[/bold green]")
+
+        # Load existing data, append new posts, and save back to JSON
+        all_posts_data = []
+        if os.path.exists(OUTPUT_JSON) and not force_fetch:
+            try:
+                with open(OUTPUT_JSON, "r", encoding="utf-8") as f:
+                    all_posts_data = json.load(f)
+                console.print(f"[bold green]Loaded {len(all_posts_data)} existing posts from {OUTPUT_JSON}.[/bold green]")
+            except json.JSONDecodeError:
+                console.print(f"[bold yellow]Avertissement:[/bold yellow] Impossible de décoder {OUTPUT_JSON}. Le fichier sera écrasé.", style="bold yellow")
+        
+        # Add only truly new posts to avoid duplicates if filtering wasn't perfect
+        existing_permalinks = {post['permalink'] for post in all_posts_data}
+        unique_new_posts = [post for post in new_posts_data if post['permalink'] not in existing_permalinks]
+        all_posts_data.extend(unique_new_posts)
 
         # Always save to JSON
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-            json.dump(posts_data, f, indent=4)
-        console.print(f"[bold green]Saved {len(posts_data)} posts to {OUTPUT_JSON}.[/bold green]")
+            json.dump(all_posts_data, f, indent=4)
+        console.print(f"[bold green]Saved {len(all_posts_data)} total posts to {OUTPUT_JSON}.[/bold green]")
+
+        # Save the new last fetch timestamp if new posts were found
+        if new_posts_data:
+            _save_last_fetch_timestamp(current_max_timestamp)
+            console.print(f"[bold green]Timestamp du dernier fetch mis à jour à {datetime.fromtimestamp(current_max_timestamp).strftime('%Y-%m-%d %H:%M:%S')}.[/bold green]")
 
         if format == "google_sheet":
             spreadsheet_name = os.getenv("GOOGLE_SHEET_NAME")
@@ -205,15 +287,15 @@ def fetch_saved_posts(format: str = "json", force_fetch: bool = False) -> dict:
                 console.print("[bold red]Erreur:[/bold red] GOOGLE_SHEET_NAME n'est pas défini dans .env. Impossible d'exporter vers Google Sheet.", style="bold red")
                 return {"content": [], "count": 0, "format": format}
             
-            success = export_to_google_sheet(posts_data, spreadsheet_name)
+            success = export_to_google_sheet(all_posts_data, spreadsheet_name)
             if success:
                 console.print("[bold green]Exportation vers Google Sheet terminée avec succès![/bold green]")
-                return {"content": posts_data, "count": len(posts_data), "format": format}
+                return {"content": all_posts_data, "count": len(all_posts_data), "format": format}
             else:
                 console.print("[bold red]Échec de l'exportation vers Google Sheet.[/bold red]")
                 return {"content": [], "count": 0, "format": format}
         
-        return {"content": posts_data, "count": len(posts_data), "format": format}
+        return {"content": all_posts_data, "count": len(all_posts_data), "format": format}
 
     except Exception as e:
         console.print(f"[bold red]Une erreur est survenue lors de la récupération des posts Reddit:[/bold red] {e}", style="bold red")
